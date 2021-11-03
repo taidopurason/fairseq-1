@@ -34,6 +34,7 @@ class MultilingualTransformerModel(FairseqMultiModel):
     Args:
         --share-encoder-embeddings: share encoder embeddings across all source languages
         --share-decoder-embeddings: share decoder embeddings across all target languages
+        --share-language-specific-embeddings: share encoder and decoder embeddings language-specifically
         --share-encoders: share all encoder params (incl. embeddings) across all source languages
         --share-decoders: share all decoder params (incl. embeddings) across all target languages
     """
@@ -64,6 +65,11 @@ class MultilingualTransformerModel(FairseqMultiModel):
             "--share-decoders",
             action="store_true",
             help="share decoders across languages",
+        )
+        parser.add_argument(
+            "--share-language-specific-embeddings",
+            action="store_true",
+            help="share encoder and decoder embeddings between the encoder and the decoder of the same language"
         )
 
     @classmethod
@@ -101,17 +107,23 @@ class MultilingualTransformerModel(FairseqMultiModel):
 
         # build shared embeddings (if applicable)
         shared_encoder_embed_tokens, shared_decoder_embed_tokens = None, None
-        if args.share_all_embeddings:
+        language_specific_embeddings = None
+
+        # checks if the encoder and decoder embed dims and paths are equal (for shared embeddings)
+        def check_encoder_decoder_embed_args_equal():
             if args.encoder_embed_dim != args.decoder_embed_dim:
                 raise ValueError(
                     "--share-all-embeddings requires --encoder-embed-dim to match --decoder-embed-dim"
                 )
             if args.decoder_embed_path and (
-                args.decoder_embed_path != args.encoder_embed_path
+                    args.decoder_embed_path != args.encoder_embed_path
             ):
                 raise ValueError(
                     "--share-all-embeddings not compatible with --decoder-embed-path"
                 )
+
+        if args.share_all_embeddings:
+            check_encoder_decoder_embed_args_equal()
             shared_encoder_embed_tokens = FairseqMultiModel.build_shared_embeddings(
                 dicts=task.dicts,
                 langs=task.langs,
@@ -139,6 +151,18 @@ class MultilingualTransformerModel(FairseqMultiModel):
                     pretrained_embed_path=args.decoder_embed_path,
                 )
 
+            if args.share_language_specific_embeddings:
+                if args.share_encoder_embeddings or args.share_decoder_embeddings:
+                    raise ValueError(
+                        "--share-language-specific-embeddings is not compatible with "
+                        "--share-encoder-embeddings or --share-decoder-embeddings."
+                    )
+                check_encoder_decoder_embed_args_equal()
+                language_specific_embeddings = {
+                    lang: build_embedding(task.dicts[lang], args.encoder_embed_dim, args.encoder_embed_path)
+                    for lang in task.langs
+                }
+
         # encoders/decoders for each language
         lang_encoders, lang_decoders = {}, {}
 
@@ -146,6 +170,8 @@ class MultilingualTransformerModel(FairseqMultiModel):
             if lang not in lang_encoders:
                 if shared_encoder_embed_tokens is not None:
                     encoder_embed_tokens = shared_encoder_embed_tokens
+                elif language_specific_embeddings is not None:
+                    encoder_embed_tokens = language_specific_embeddings[lang]
                 else:
                     encoder_embed_tokens = build_embedding(
                         task.dicts[lang],
@@ -161,6 +187,8 @@ class MultilingualTransformerModel(FairseqMultiModel):
             if lang not in lang_decoders:
                 if shared_decoder_embed_tokens is not None:
                     decoder_embed_tokens = shared_decoder_embed_tokens
+                elif language_specific_embeddings is not None:
+                    decoder_embed_tokens = language_specific_embeddings[lang]
                 else:
                     decoder_embed_tokens = build_embedding(
                         task.dicts[lang],
@@ -210,6 +238,7 @@ def base_multilingual_architecture(args):
     base_architecture(args)
     args.share_encoder_embeddings = getattr(args, "share_encoder_embeddings", False)
     args.share_decoder_embeddings = getattr(args, "share_decoder_embeddings", False)
+    args.share_language_specific_embeddings = getattr(args, "share_language_specific_embeddings", False)
     args.share_encoders = getattr(args, "share_encoders", False)
     args.share_decoders = getattr(args, "share_decoders", False)
 
