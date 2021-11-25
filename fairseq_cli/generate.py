@@ -298,7 +298,7 @@ def _main(cfg: DictConfig, output_file):
                         file=output_file,
                     )
 
-                    if cfg.generation.print_alignment == "hard":
+                    if cfg.generation.print_alignment in ["hard", "hard_shifted"]:
                         print(
                             "A-{}\t{}".format(
                                 sample_id,

@@ -892,7 +892,7 @@ class GenerationConfig(FairseqDataclass):
         default=None,
         metadata={
             "help": "if set, uses attention feedback to compute and print alignment to source tokens "
-            "(valid options are: hard, soft, otherwise treated as hard alignment)",
+            "(valid options are: hard, hard_shifted, soft, otherwise treated as hard alignment)",
             "argparse_const": "hard",
         },
     )

@@ -883,6 +883,8 @@ class SequenceGeneratorWithAlignment(SequenceGenerator):
 
         if print_alignment == "hard":
             self.extract_alignment = utils.extract_hard_alignment
+        elif print_alignment == "hard_shifted":
+            self.extract_alignment = utils.extract_hard_alignment_shifted
         elif print_alignment == "soft":
             self.extract_alignment = utils.extract_soft_alignment
 
