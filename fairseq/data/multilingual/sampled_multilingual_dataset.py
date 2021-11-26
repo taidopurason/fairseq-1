@@ -6,6 +6,7 @@
 import logging
 
 import numpy as np
+
 from fairseq.data import SampledMultiDataset
 
 logger = logging.getLogger(__name__)
@@ -18,11 +19,11 @@ class SampledMultilingualDataset(SampledMultiDataset):
     """
 
     def batch_by_size(
-            self,
-            indices,
-            max_tokens=None,
-            max_sentences=None,
-            required_batch_size_multiple=1,
+        self,
+        indices,
+        max_tokens=None,
+        max_sentences=None,
+        required_batch_size_multiple=1,
     ):
         dataset_indices = [[] for _ in range(len(self.datasets))]
         for i in indices:
@@ -37,7 +38,9 @@ class SampledMultilingualDataset(SampledMultiDataset):
                 max_sentences,
                 required_batch_size_multiple,
             )
-            logger.info(f"Created {len(cur_batches)} batches for dataset {self.keys[ds_idx]}")
+            logger.info(
+                f"Created {len(cur_batches)} batches for dataset {self.keys[ds_idx]}"
+            )
             batches += cur_batches
 
         return batches

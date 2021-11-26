@@ -8,41 +8,47 @@ import time
 from collections import OrderedDict
 
 from fairseq import utils
-from fairseq.tasks.translation import load_langpair_dataset
-
 from fairseq.tasks import register_task
 from fairseq.tasks.multilingual_translation import MultilingualTranslationTask
+from fairseq.tasks.translation import load_langpair_dataset
 from fairseq.utils import csv_str_list
 
-from .translation_multi_simple_epoch import get_time_gap
-from ..data import iterators, FairseqDataset, data_utils
+from ..data import FairseqDataset, data_utils, iterators
 from ..data.multilingual.sampled_multi_dataset import CollateFormat
 from ..data.multilingual.sampled_multilingual_dataset import SampledMultilingualDataset
 from ..data.multilingual.sampling_method import SamplingMethod
+from .translation_multi_simple_epoch import get_time_gap
 
 logger = logging.getLogger(__name__)
 
 
 @register_task("multilingual_translation_sampled")
 class SampledMultilingualTranslationTask(MultilingualTranslationTask):
-
     @staticmethod
     def add_args(parser):
         MultilingualTranslationTask.add_args(parser)
         SamplingMethod.add_arguments(parser)
-        parser.add_argument('--model-lang-pairs',
-                            default=None,
-                            type=csv_str_list,
-                            help='language pairs that will be used for building the model. --lang-pairs are used by default.')
-        parser.add_argument('--eval-lang-pairs',
-                            default=None,
-                            type=csv_str_list,
-                            help='language pairs that will be used for evaluating the model. --lang-pairs are used by default.')
+        parser.add_argument(
+            "--model-lang-pairs",
+            default=None,
+            type=csv_str_list,
+            help="language pairs that will be used for building the model. --lang-pairs are used by default.",
+        )
+        parser.add_argument(
+            "--eval-lang-pairs",
+            default=None,
+            type=csv_str_list,
+            help="language pairs that will be used for evaluating the model. --lang-pairs are used by default.",
+        )
 
     def __init__(self, args, dicts, training):
         super().__init__(args, dicts, training)
-        self.model_lang_pairs = self.lang_pairs if args.model_lang_pairs is None else args.model_lang_pairs
-        self.eval_lang_pairs = self.lang_pairs if args.eval_lang_pairs is None else args.eval_lang_pairs
+        self.model_lang_pairs = (
+            self.lang_pairs if args.model_lang_pairs is None else args.model_lang_pairs
+        )
+        self.eval_lang_pairs = (
+            self.lang_pairs if args.eval_lang_pairs is None else args.eval_lang_pairs
+        )
 
     def load_dataset(self, split, epoch=1, **kwargs):
         """Load a dataset split."""
@@ -75,13 +81,19 @@ class SampledMultilingualTranslationTask(MultilingualTranslationTask):
                 tgt_lang=tgt,
             )
 
-        datasets = OrderedDict([
-            (lang_pair, language_pair_dataset(lang_pair))
-            for lang_pair in self.lang_pairs
-        ])
+        datasets = OrderedDict(
+            [
+                (lang_pair, language_pair_dataset(lang_pair))
+                for lang_pair in self.lang_pairs
+            ]
+        )
 
         sampling_method = SamplingMethod(self.args, self).sampling_method_selector()
-        ratios = None if sampling_method is None else sampling_method([len(dataset) for dataset in datasets.values()])
+        ratios = (
+            None
+            if sampling_method is None
+            else sampling_method([len(dataset) for dataset in datasets.values()])
+        )
 
         self.datasets[split] = SampledMultilingualDataset(
             datasets,
@@ -89,7 +101,9 @@ class SampledMultilingualTranslationTask(MultilingualTranslationTask):
             sampling_ratios=ratios,
             seed=self.args.seed,
             collate_format=CollateFormat.ordered_dict,
-            eval_key=None if self.training else f"{self.args.source_lang}-{self.args.target_lang}"
+            eval_key=None
+            if self.training
+            else f"{self.args.source_lang}-{self.args.target_lang}",
         )
 
     # needs to be overridden to work with SampledMultiDataset
@@ -111,7 +125,7 @@ class SampledMultilingualTranslationTask(MultilingualTranslationTask):
         )
 
     def train_step(
-            self, sample, model, criterion, optimizer, update_num, ignore_grad=False
+        self, sample, model, criterion, optimizer, update_num, ignore_grad=False
     ):
         # each sample contains one language-pair
         assert len(sample) == 1
@@ -128,13 +142,13 @@ class SampledMultilingualTranslationTask(MultilingualTranslationTask):
 
     # from translation_multi_simple_epoch
     def create_batch_sampler_func(
-            self,
-            max_positions,
-            ignore_invalid_inputs,
-            max_tokens,
-            max_sentences,
-            required_batch_size_multiple=1,
-            seed=1,
+        self,
+        max_positions,
+        ignore_invalid_inputs,
+        max_tokens,
+        max_sentences,
+        required_batch_size_multiple=1,
+        seed=1,
     ):
         def construct_batch_sampler(dataset, epoch):
             splits = [
@@ -192,20 +206,20 @@ class SampledMultilingualTranslationTask(MultilingualTranslationTask):
     # from translation_multi_simple_epoch
     # we need to override get_batch_iterator because we want to reset the epoch iterator each time
     def get_batch_iterator(
-            self,
-            dataset,
-            max_tokens=None,
-            max_sentences=None,
-            max_positions=None,
-            ignore_invalid_inputs=False,
-            required_batch_size_multiple=1,
-            seed=1,
-            num_shards=1,
-            shard_id=0,
-            num_workers=0,
-            epoch=1,
-            data_buffer_size=0,
-            disable_iterator_cache=False,
+        self,
+        dataset,
+        max_tokens=None,
+        max_sentences=None,
+        max_positions=None,
+        ignore_invalid_inputs=False,
+        required_batch_size_multiple=1,
+        seed=1,
+        num_shards=1,
+        shard_id=0,
+        num_workers=0,
+        epoch=1,
+        data_buffer_size=0,
+        disable_iterator_cache=False,
     ):
         """
         Get an iterator that yields batches of data from the given dataset.

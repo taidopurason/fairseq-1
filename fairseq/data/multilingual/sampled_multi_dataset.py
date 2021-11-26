@@ -14,6 +14,7 @@ from typing import List
 
 import numpy as np
 import torch
+
 from fairseq.data import FairseqDataset, data_utils
 from fairseq.distributed import utils as distributed_utils
 

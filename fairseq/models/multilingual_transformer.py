@@ -69,7 +69,7 @@ class MultilingualTransformerModel(FairseqMultiModel):
         parser.add_argument(
             "--share-language-specific-embeddings",
             action="store_true",
-            help="share encoder and decoder embeddings between the encoder and the decoder of the same language"
+            help="share encoder and decoder embeddings between the encoder and the decoder of the same language",
         )
 
     @classmethod
@@ -116,7 +116,7 @@ class MultilingualTransformerModel(FairseqMultiModel):
                     "--share-all-embeddings requires --encoder-embed-dim to match --decoder-embed-dim"
                 )
             if args.decoder_embed_path and (
-                    args.decoder_embed_path != args.encoder_embed_path
+                args.decoder_embed_path != args.encoder_embed_path
             ):
                 raise ValueError(
                     "--share-all-embeddings not compatible with --decoder-embed-path"
@@ -159,7 +159,11 @@ class MultilingualTransformerModel(FairseqMultiModel):
                     )
                 check_encoder_decoder_embed_args_equal()
                 language_specific_embeddings = {
-                    lang: build_embedding(task.dicts[lang], args.encoder_embed_dim, args.encoder_embed_path)
+                    lang: build_embedding(
+                        task.dicts[lang],
+                        args.encoder_embed_dim,
+                        args.encoder_embed_path,
+                    )
                     for lang in task.langs
                 }
 
@@ -238,7 +242,9 @@ def base_multilingual_architecture(args):
     base_architecture(args)
     args.share_encoder_embeddings = getattr(args, "share_encoder_embeddings", False)
     args.share_decoder_embeddings = getattr(args, "share_decoder_embeddings", False)
-    args.share_language_specific_embeddings = getattr(args, "share_language_specific_embeddings", False)
+    args.share_language_specific_embeddings = getattr(
+        args, "share_language_specific_embeddings", False
+    )
     args.share_encoders = getattr(args, "share_encoders", False)
     args.share_decoders = getattr(args, "share_decoders", False)
 
