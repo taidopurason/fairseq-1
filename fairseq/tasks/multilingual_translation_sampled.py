@@ -220,6 +220,9 @@ class SampledMultilingualTranslationTask(MultilingualTranslationTask):
         epoch=1,
         data_buffer_size=0,
         disable_iterator_cache=False,
+        skip_remainder_batch=False,
+        grouped_shuffling=False,
+        update_epoch_batch_itr=False,
     ):
         """
         Get an iterator that yields batches of data from the given dataset.
@@ -252,6 +255,11 @@ class SampledMultilingualTranslationTask(MultilingualTranslationTask):
             disable_iterator_cache (bool, optional): don't cache the
                 EpochBatchIterator (ignores `FairseqTask::can_reuse_epoch_itr`)
                 (default: False).
+            grouped_shuffling (bool, optional): group batches with each groups
+                containing num_shards batches and shuffle groups. Reduces difference
+                between sequence lengths among workers for batches sorted by length.
+            update_epoch_batch_itr (bool optional): if true then donot use the cached
+                batch iterator for the epoch
         Returns:
             ~fairseq.iterators.EpochBatchIterator: a batched iterator over the
                 given dataset split
@@ -275,6 +283,9 @@ class SampledMultilingualTranslationTask(MultilingualTranslationTask):
                 epoch=epoch,
                 data_buffer_size=data_buffer_size,
                 disable_iterator_cache=disable_iterator_cache,
+                skip_remainder_batch=False,
+                grouped_shuffling=False,
+                update_epoch_batch_itr=False,
             )
             self.dataset_to_epoch_iter[dataset] = batch_iter
             return batch_iter
