@@ -3,7 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 
 from fairseq import utils
 from fairseq.models import (
@@ -39,8 +39,9 @@ class MultilingualTransformerModel(FairseqMultiModel):
         --share-decoders: share all decoder params (incl. embeddings) across all target languages
     """
 
-    def __init__(self, encoders, decoders):
+    def __init__(self, encoders, decoders, args):
         super().__init__(encoders, decoders)
+        self.args = args
 
     @staticmethod
     def add_args(parser):
@@ -70,6 +71,11 @@ class MultilingualTransformerModel(FairseqMultiModel):
             "--share-language-specific-embeddings",
             action="store_true",
             help="share encoder and decoder embeddings between the encoder and the decoder of the same language",
+        )
+        parser.add_argument(
+            "--reduced-state-dict",
+            action="store_true",
+            help="Save only the encoders and decoders, not every language pair (avoids duplicating the encoders/decoders).",
         )
 
     @classmethod
@@ -220,7 +226,7 @@ class MultilingualTransformerModel(FairseqMultiModel):
                 shared_decoder if shared_decoder is not None else get_decoder(tgt)
             )
 
-        return MultilingualTransformerModel(encoders, decoders)
+        return MultilingualTransformerModel(encoders, decoders, args)
 
     @classmethod
     def _get_module_class(cls, is_encoder, args, lang_dict, embed_tokens, langs):
@@ -228,13 +234,84 @@ class MultilingualTransformerModel(FairseqMultiModel):
         return module_class(args, lang_dict, embed_tokens)
 
     def load_state_dict(self, state_dict, strict=True, model_cfg=None):
-        state_dict_subset = state_dict.copy()
-        for k, _ in state_dict.items():
-            assert k.startswith("models.")
-            lang_pair = k.split(".")[1]
-            if lang_pair not in self.models:
-                del state_dict_subset[k]
+        if self._is_reduced_state_dict(state_dict):
+            state_dict_subset = self.restore_reduced_state_dict(
+                state_dict, self.models.keys()
+            )
+        else:
+            state_dict_subset = state_dict.copy()
+            for k, _ in state_dict.items():
+                assert k.startswith("models.")
+                lang_pair = k.split(".")[1]
+                if lang_pair not in self.models:
+                    del state_dict_subset[k]
         super().load_state_dict(state_dict_subset, strict=strict, model_cfg=model_cfg)
+
+    @staticmethod
+    def _is_reduced_state_dict(state_dict):
+        return any(
+            map(
+                lambda k: k.startswith("encoders.") or k.startswith("decoders."),
+                state_dict.keys(),
+            )
+        )
+
+    @staticmethod
+    def restore_reduced_state_dict(state_dict, lang_pairs):
+        encoders = defaultdict(lambda: [])
+        decoders = defaultdict(lambda: [])
+
+        for k in state_dict.keys():
+            module, lang, *rest = k.split(".")
+            if module == "encoders":
+                encoders[lang].append(".".join(rest))
+            elif module == "decoders":
+                decoders[lang].append(".".join(rest))
+            else:
+                raise ValueError(
+                    f"state must belong to an encoder or a decoder. state={k}"
+                )
+
+        new_state_dict = OrderedDict()
+        for lang_pair in lang_pairs:
+            src, tgt = lang_pair.split("-")
+            for k in encoders[src]:
+                new_state_dict[f"models.{lang_pair}.encoder.{k}"] = state_dict[
+                    f"encoders.{src}.{k}"
+                ]
+            for k in decoders[tgt]:
+                new_state_dict[f"models.{lang_pair}.decoder.{k}"] = state_dict[
+                    f"decoders.{tgt}.{k}"
+                ]
+        return new_state_dict
+
+    @staticmethod
+    def reduce_state_dict(state_dict):
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            lang_pair, module, *rest = k.split(".")[1:]
+
+            if module != "encoder" and module != "decoder":
+                raise ValueError(
+                    f"reduced state dict only works with encoder-decoder models. key={k}"
+                )
+
+            src, tgt = lang_pair.split("-")
+
+            new_key = (
+                f"{module}s.{src if module == 'encoder' else tgt}.{'.'.join(rest)}"
+            )
+
+            if new_key not in new_state_dict:
+                new_state_dict[new_key] = v
+
+        return new_state_dict
+
+    def state_dict(self, *args, **kwargs):
+        state_dict = super().state_dict(*args, **kwargs)
+        if self.args.reduced_state_dict:
+            return self.reduce_state_dict(state_dict)
+        return state_dict
 
 
 @register_model_architecture("multilingual_transformer", "multilingual_transformer")
@@ -247,6 +324,7 @@ def base_multilingual_architecture(args):
     )
     args.share_encoders = getattr(args, "share_encoders", False)
     args.share_decoders = getattr(args, "share_decoders", False)
+    args.reduced_state_dict = getattr(args, "reduced_state_dict", False)
 
 
 @register_model_architecture(
