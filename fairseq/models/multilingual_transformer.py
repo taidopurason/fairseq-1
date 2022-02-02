@@ -2,8 +2,9 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-
+from argparse import Namespace
 from collections import OrderedDict, defaultdict
+from typing import Dict, List, Optional
 
 from fairseq import utils
 from fairseq.models import (
@@ -18,7 +19,118 @@ from fairseq.models.transformer import (
     TransformerModel,
     base_architecture,
 )
+from fairseq.modules import TransformerEncoderLayer
 from fairseq.utils import safe_hasattr
+
+
+def list_of_csv_str_lists(arg: Optional[str]) -> Optional[List[List[str]]]:
+    """
+    :param arg: string with semicolon separated comma delimited lists, e.g "et,fi;de,en;lt,lv"
+    :return: None, if argument is None, else list of lists, e.g. [["et", "fi"], ["de", "en"], ["lt", "lv"]]
+    """
+    return None if arg is None else list(map(lambda x: x.split(","), arg.split(";")))
+
+
+class EncoderLayerSharingManager:
+    def __init__(self, args: Namespace):
+        self.n_shared_layers = args.shared_encoder_layers
+        self.n_shared_lang_group_layers = args.shared_encoder_lang_group_layers
+        self.lang_groups = args.lang_groups
+
+        self.shared_layers = None
+        self.shared_group_layers = {}
+
+        if self.n_shared_lang_group_layers > 0 and self.lang_groups is not None:
+            lang_groups = list(
+                (lang, i) for i, langs in enumerate(self.lang_groups) for lang in langs
+            )
+            self.lang2group = dict(lang_groups)
+            if len(self.lang2group) != len(lang_groups):
+                raise ValueError("overlaping language groups")
+        else:
+            self.lang2group = None
+
+    @staticmethod
+    def add_args(parser):
+        parser.add_argument(
+            "--shared-encoder-layers",
+            type=int,
+            help="number of top layers to share in the encoder",
+        )
+        parser.add_argument(
+            "--shared-encoder-lang-group-layers",
+            type=int,
+            help="number of language group layers to share",
+        )
+        parser.add_argument(
+            "--lang-groups",
+            default=None,
+            type=list_of_csv_str_lists,
+            help="semicolon separated list of language groups. "
+            "Each group consists of comma separated languages. "
+            "Groups must be non-overlapping e.g. et,fi;lt,lv,ru;en,de",
+        )
+
+    @staticmethod
+    def base_architecture(args):
+        args.shared_encoder_layers = getattr(args, "shared_encoder_layers", 0)
+        args.shared_encoder_lang_group_layers = getattr(
+            args, "shared_encoder_lang_group_layers", 0
+        )
+        args.lang_groups = getattr(args, "lang_groups", None)
+
+    @property
+    def is_sharing(self):
+        return self.lang2group is not None or self.n_shared_layers > 0
+
+    def _get_shared_layers(self, lang: str) -> Dict[int, TransformerEncoderLayer]:
+        # returns the shared layers for a language in the for of dict whose keys are layer indixes (e.g. 1, 2, -1, etc)
+        shared_layers = {}
+        if self.n_shared_layers > 0 and self.shared_layers is not None:
+            shared_layers.update(
+                {
+                    -i - 1: module
+                    for i, module in enumerate(reversed(self.shared_layers))
+                }
+            )
+        if self.lang2group is not None and lang in self.lang2group:
+            group = self.lang2group[lang]
+            if group in self.shared_group_layers:
+                shared_layers.update(
+                    {
+                        -self.n_shared_layers - i - 1: module
+                        for i, module in enumerate(
+                            reversed(self.shared_group_layers[group])
+                        )
+                    }
+                )
+        return shared_layers
+
+    def _update_shared_layers(self, lang: str, model: TransformerEncoder):
+        # Updates the internal state with shared layers of the specified lang
+        if self.n_shared_layers > 0 and self.shared_layers is None:
+            self.shared_layers = model.layers[-self.n_shared_layers :]
+
+        if self.lang2group is not None and lang in self.lang2group:
+            group = self.lang2group[lang]
+            if group not in self.shared_group_layers:
+                idx_from = -self.n_shared_lang_group_layers - self.n_shared_layers
+                idx_to = -self.n_shared_layers if self.n_shared_layers > 0 else None
+                self.shared_group_layers[group] = model.layers[idx_from:idx_to]
+
+    def _write_shared_layers(
+        self,
+        model: TransformerEncoder,
+        shared_layers: Dict[int, TransformerEncoderLayer],
+    ):
+        for i, module in shared_layers.items():
+            model.layers[i] = module
+
+    def share_layers(self, lang: str, model: TransformerEncoder):
+        shared_layers = self._get_shared_layers(lang)
+        if len(shared_layers) > 0:
+            self._write_shared_layers(model, shared_layers)
+        self._update_shared_layers(lang, model)
 
 
 @register_model("multilingual_transformer")
@@ -47,6 +159,7 @@ class MultilingualTransformerModel(FairseqMultiModel):
     def add_args(parser):
         """Add model-specific arguments to the parser."""
         TransformerModel.add_args(parser)
+        EncoderLayerSharingManager.add_args(parser)
         parser.add_argument(
             "--share-encoder-embeddings",
             action="store_true",
@@ -176,6 +289,8 @@ class MultilingualTransformerModel(FairseqMultiModel):
         # encoders/decoders for each language
         lang_encoders, lang_decoders = {}, {}
 
+        encoder_sharing_manager = EncoderLayerSharingManager(args)
+
         def get_encoder(lang):
             if lang not in lang_encoders:
                 if shared_encoder_embed_tokens is not None:
@@ -188,9 +303,12 @@ class MultilingualTransformerModel(FairseqMultiModel):
                         args.encoder_embed_dim,
                         args.encoder_embed_path,
                     )
-                lang_encoders[lang] = cls._get_module_class(
+                encoder = cls._get_module_class(
                     True, args, task.dicts[lang], encoder_embed_tokens, src_langs
                 )
+                if encoder_sharing_manager.is_sharing:
+                    encoder_sharing_manager.share_layers(lang, encoder)
+                lang_encoders[lang] = encoder
             return lang_encoders[lang]
 
         def get_decoder(lang):
@@ -325,6 +443,7 @@ def base_multilingual_architecture(args):
     args.share_encoders = getattr(args, "share_encoders", False)
     args.share_decoders = getattr(args, "share_decoders", False)
     args.reduced_state_dict = getattr(args, "reduced_state_dict", False)
+    EncoderLayerSharingManager.base_architecture(args)
 
 
 @register_model_architecture(
