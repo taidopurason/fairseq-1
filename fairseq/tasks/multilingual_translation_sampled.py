@@ -48,12 +48,17 @@ class SampledMultilingualTranslationTask(MultilingualTranslationTask):
 
     def __init__(self, args, dicts, training):
         super().__init__(args, dicts, training)
-        self.model_lang_pairs = (
-            self.lang_pairs if args.model_lang_pairs is None else args.model_lang_pairs
-        )
-        self.eval_lang_pairs = (
-            self.lang_pairs if args.eval_lang_pairs is None else args.eval_lang_pairs
-        )
+        if training:
+            self.model_lang_pairs = (
+                self.lang_pairs
+                if args.model_lang_pairs is None
+                else args.model_lang_pairs
+            )
+            self.eval_lang_pairs = (
+                self.lang_pairs
+                if args.eval_lang_pairs is None
+                else args.eval_lang_pairs
+            )
 
     def load_dataset(self, split, epoch=1, **kwargs):
         """Load a dataset split."""
