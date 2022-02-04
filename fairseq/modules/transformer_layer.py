@@ -7,14 +7,14 @@ from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
+from torch import Tensor
+
 from fairseq import utils
+from fairseq.models.transformer import TransformerConfig
 from fairseq.modules import LayerNorm, MultiheadAttention
+from fairseq.modules.adapter import Adapter
 from fairseq.modules.fairseq_dropout import FairseqDropout
 from fairseq.modules.quant_noise import quant_noise
-from torch import Tensor
-from fairseq.models.transformer import (
-    TransformerConfig,
-)
 
 
 class TransformerEncoderLayerBase(nn.Module):
@@ -64,6 +64,13 @@ class TransformerEncoderLayerBase(nn.Module):
             self.quant_noise,
             self.quant_noise_block_size,
         )
+
+        if utils.safe_getattr(cfg, "encoder_use_adapter", None):
+            self.adapter = Adapter(
+                self.embed_dim, utils.safe_getattr(cfg, "encoder_adapter_dim", None)
+            )
+        else:
+            self.adapter = None
 
         self.final_layer_norm = LayerNorm(self.embed_dim, export=cfg.export)
 
@@ -132,8 +139,7 @@ class TransformerEncoderLayerBase(nn.Module):
         # will become -inf, which results in NaN in model parameters
         if attn_mask is not None:
             attn_mask = attn_mask.masked_fill(
-                attn_mask.to(torch.bool),
-                -1e8 if x.dtype == torch.float32 else -1e4
+                attn_mask.to(torch.bool), -1e8 if x.dtype == torch.float32 else -1e4
             )
 
         residual = x
@@ -159,6 +165,10 @@ class TransformerEncoderLayerBase(nn.Module):
         x = self.activation_dropout_module(x)
         x = self.fc2(x)
         x = self.dropout_module(x)
+
+        if self.adapter is not None:
+            x = self.adapter(x)
+
         x = self.residual_connection(x, residual)
         if not self.normalize_before:
             x = self.final_layer_norm(x)
@@ -213,11 +223,19 @@ class TransformerDecoderLayerBase(nn.Module):
             add_bias_kv=add_bias_kv,
             add_zero_attn=add_zero_attn,
         )
-        self.attn_ln = LayerNorm(self.embed_dim) if utils.safe_getattr(cfg, 'scale_attn', False) else None
+        self.attn_ln = (
+            LayerNorm(self.embed_dim)
+            if utils.safe_getattr(cfg, "scale_attn", False)
+            else None
+        )
         self.nh = self.self_attn.num_heads
         self.head_dim = self.self_attn.head_dim
-        scale_heads = utils.safe_getattr(cfg, 'scale_heads', False)
-        self.c_attn = nn.Parameter(torch.ones((self.nh,)), requires_grad=True) if scale_heads else None
+        scale_heads = utils.safe_getattr(cfg, "scale_heads", False)
+        self.c_attn = (
+            nn.Parameter(torch.ones((self.nh,)), requires_grad=True)
+            if scale_heads
+            else None
+        )
 
         self.activation_fn = utils.get_activation_fn(activation=cfg.activation_fn)
         activation_dropout_p = cfg.activation_dropout
@@ -238,8 +256,21 @@ class TransformerDecoderLayerBase(nn.Module):
             self.encoder_attn = self.build_encoder_attention(self.embed_dim, cfg)
             self.encoder_attn_layer_norm = LayerNorm(self.embed_dim, export=cfg.export)
 
-        self.ffn_layernorm = LayerNorm(cfg.decoder.ffn_embed_dim) if utils.safe_getattr(cfg, 'scale_fc', False) else None
-        self.w_resid = nn.Parameter(torch.ones(self.embed_dim, ), requires_grad=True) if utils.safe_getattr(cfg, 'scale_resids', False) else None
+        self.ffn_layernorm = (
+            LayerNorm(cfg.decoder.ffn_embed_dim)
+            if utils.safe_getattr(cfg, "scale_fc", False)
+            else None
+        )
+        self.w_resid = (
+            nn.Parameter(
+                torch.ones(
+                    self.embed_dim,
+                ),
+                requires_grad=True,
+            )
+            if utils.safe_getattr(cfg, "scale_resids", False)
+            else None
+        )
 
         self.fc1 = self.build_fc1(
             self.embed_dim,
@@ -253,6 +284,13 @@ class TransformerDecoderLayerBase(nn.Module):
             self.quant_noise,
             self.quant_noise_block_size,
         )
+
+        if utils.safe_getattr(cfg, "decoder_use_adapter", None):
+            self.adapter = Adapter(
+                self.embed_dim, utils.safe_getattr(cfg, "decoder_adapter_dim", None)
+            )
+        else:
+            self.adapter = None
 
         self.final_layer_norm = LayerNorm(self.embed_dim, export=cfg.export)
         self.need_attn = True
@@ -296,7 +334,6 @@ class TransformerDecoderLayerBase(nn.Module):
 
     def residual_connection(self, x, residual):
         return residual + x
-
 
     def forward(
         self,
@@ -377,7 +414,7 @@ class TransformerDecoderLayerBase(nn.Module):
         if self.c_attn is not None:
             tgt_len, bsz = x.size(0), x.size(1)
             x = x.view(tgt_len, bsz, self.nh, self.head_dim)
-            x = torch.einsum('tbhd,h->tbhd', x, self.c_attn)
+            x = torch.einsum("tbhd,h->tbhd", x, self.c_attn)
             x = x.reshape(tgt_len, bsz, self.embed_dim)
         if self.attn_ln is not None:
             x = self.attn_ln(x)
@@ -426,6 +463,10 @@ class TransformerDecoderLayerBase(nn.Module):
             x = self.ffn_layernorm(x)
         x = self.fc2(x)
         x = self.dropout_module(x)
+
+        if self.adapter is not None:
+            x = self.adapter(x)
+
         if self.w_resid is not None:
             residual = torch.mul(self.w_resid, residual)
         x = self.residual_connection(x, residual)

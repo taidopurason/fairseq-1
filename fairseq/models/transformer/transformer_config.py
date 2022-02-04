@@ -30,6 +30,10 @@ class EncDecBaseConfig(FairseqDataclass):
     embed_dim: Optional[int] = field(
         default=512, metadata={"help": "embedding dimension"}
     )
+    adapter_dim: Optional[int] = field(
+        default=256, metadata={"help": "Adapter hidden dimension"}
+    )
+    use_adapter: bool = field(default=False, metadata={"help": "Use adapter"})
     ffn_embed_dim: int = field(
         default=2048, metadata={"help": "embedding dimension for FFN"}
     )

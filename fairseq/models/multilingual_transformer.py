@@ -167,6 +167,20 @@ class MultilingualTransformerModel(FairseqMultiModel):
                     for lang in task.langs
                 }
 
+        is_using_adapters = getattr(args, "encoder_use_adapter", False) or getattr(
+            args, "decoder_use_adapter", False
+        )
+
+        def prepare_for_adapter(module):
+            if is_using_adapters:
+                for p in module.parameters():
+                    p.requires_grad = False
+
+                for layer in module.layers:
+                    if getattr(layer, "adapter", None) is not None:
+                        for p in layer.adapter.parameters():
+                            p.requires_grad = True
+
         # encoders/decoders for each language
         lang_encoders, lang_decoders = {}, {}
 
@@ -185,6 +199,7 @@ class MultilingualTransformerModel(FairseqMultiModel):
                 lang_encoders[lang] = cls._get_module_class(
                     True, args, task.dicts[lang], encoder_embed_tokens, src_langs
                 )
+                prepare_for_adapter(lang_encoders[lang])
             return lang_encoders[lang]
 
         def get_decoder(lang):
@@ -202,6 +217,7 @@ class MultilingualTransformerModel(FairseqMultiModel):
                 lang_decoders[lang] = cls._get_module_class(
                     False, args, task.dicts[lang], decoder_embed_tokens, tgt_langs
                 )
+                prepare_for_adapter(lang_decoders[lang])
             return lang_decoders[lang]
 
         # shared encoders/decoders (if applicable)
