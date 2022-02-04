@@ -39,8 +39,9 @@ class MultilingualTransformerModel(FairseqMultiModel):
         --share-decoders: share all decoder params (incl. embeddings) across all target languages
     """
 
-    def __init__(self, encoders, decoders):
+    def __init__(self, encoders, decoders, args):
         super().__init__(encoders, decoders)
+        self.args = args
 
     @staticmethod
     def add_args(parser):
@@ -70,6 +71,11 @@ class MultilingualTransformerModel(FairseqMultiModel):
             "--share-language-specific-embeddings",
             action="store_true",
             help="share encoder and decoder embeddings between the encoder and the decoder of the same language",
+        )
+        parser.add_argument(
+            "--nonstrict-model-load",
+            action="store_true",
+            help="enables loading models that have extra languages or missing languages",
         )
 
     @classmethod
@@ -236,7 +242,7 @@ class MultilingualTransformerModel(FairseqMultiModel):
                 shared_decoder if shared_decoder is not None else get_decoder(tgt)
             )
 
-        return MultilingualTransformerModel(encoders, decoders)
+        return MultilingualTransformerModel(encoders, decoders, args)
 
     @classmethod
     def _get_module_class(cls, is_encoder, args, lang_dict, embed_tokens, langs):
@@ -250,7 +256,11 @@ class MultilingualTransformerModel(FairseqMultiModel):
             lang_pair = k.split(".")[1]
             if lang_pair not in self.models:
                 del state_dict_subset[k]
-        super().load_state_dict(state_dict_subset, strict=strict, model_cfg=model_cfg)
+        super().load_state_dict(
+            state_dict_subset,
+            strict=not self.args.nonstrict_model_load and strict,
+            model_cfg=model_cfg,
+        )
 
 
 @register_model_architecture("multilingual_transformer", "multilingual_transformer")
@@ -277,4 +287,5 @@ def multilingual_transformer_iwslt_de_en(args):
     args.decoder_ffn_embed_dim = getattr(args, "decoder_ffn_embed_dim", 1024)
     args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 4)
     args.decoder_layers = getattr(args, "decoder_layers", 6)
+    args.nonstrict_model_load = getattr(args, "nonstrict_model_load", False)
     base_multilingual_architecture(args)
