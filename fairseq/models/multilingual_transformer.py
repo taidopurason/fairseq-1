@@ -20,15 +20,7 @@ from fairseq.models.transformer import (
     base_architecture,
 )
 from fairseq.modules import TransformerEncoderLayer
-from fairseq.utils import safe_hasattr
-
-
-def list_of_csv_str_lists(arg: Optional[str]) -> Optional[List[List[str]]]:
-    """
-    :param arg: string with semicolon separated comma delimited lists, e.g "et,fi;de,en;lt,lv"
-    :return: None, if argument is None, else list of lists, e.g. [["et", "fi"], ["de", "en"], ["lt", "lv"]]
-    """
-    return None if arg is None else list(map(lambda x: x.split(","), arg.split(";")))
+from fairseq.utils import check_lang_groups, list_of_csv_str_lists, safe_hasattr
 
 
 class EncoderLayerSharingManager:
@@ -41,12 +33,10 @@ class EncoderLayerSharingManager:
         self.shared_group_layers = {}
 
         if self.n_shared_lang_group_layers > 0 and self.lang_groups is not None:
-            lang_groups = list(
+            check_lang_groups(self.lang_groups)
+            self.lang2group = dict(
                 (lang, i) for i, langs in enumerate(self.lang_groups) for lang in langs
             )
-            self.lang2group = dict(lang_groups)
-            if len(self.lang2group) != len(lang_groups):
-                raise ValueError("overlaping language groups")
         else:
             self.lang2group = None
 
@@ -189,6 +179,13 @@ class MultilingualTransformerModel(FairseqMultiModel):
             "--reduced-state-dict",
             action="store_true",
             help="Save only the encoders and decoders, not every language pair (avoids duplicating the encoders/decoders).",
+        )
+        parser.add_argument(
+            "--lang-group-modules",
+            default=None,
+            type=list_of_csv_str_lists,
+            help="share language-group modules instead of language modules."
+            "e.g. et,fi;de,en",
         )
 
     @classmethod
@@ -335,6 +332,13 @@ class MultilingualTransformerModel(FairseqMultiModel):
         if args.share_decoders:
             shared_decoder = get_decoder(tgt_langs[0])
 
+        if args.lang_group_modules:
+            check_lang_groups(args.lang_group_modules)
+            for lang_group in args.lang_group_modules:
+                for lang in lang_group:
+                    lang_encoders[lang] = get_encoder(lang_group[0])
+                    lang_decoders[lang] = get_decoder(lang_group[0])
+
         encoders, decoders = OrderedDict(), OrderedDict()
         for lang_pair, src, tgt in zip(task.model_lang_pairs, src_langs, tgt_langs):
             encoders[lang_pair] = (
@@ -443,6 +447,7 @@ def base_multilingual_architecture(args):
     args.share_encoders = getattr(args, "share_encoders", False)
     args.share_decoders = getattr(args, "share_decoders", False)
     args.reduced_state_dict = getattr(args, "reduced_state_dict", False)
+    args.lang_group_modules = getattr(args, "lang_group_modules", None)
     EncoderLayerSharingManager.base_architecture(args)
 
 

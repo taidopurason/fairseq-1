@@ -45,6 +45,7 @@ def default_virtual_size_func(datasets, ratios, max_scale_up=1.5):
 class CollateFormat(Enum):
     single = 1
     ordered_dict = 2
+    ordered_dict_simple = 3
 
 
 class SampledMultiDataset(FairseqDataset):
@@ -328,6 +329,9 @@ class SampledMultiDataset(FairseqDataset):
                 batch["tgt_lang_id"] = straight_order(
                     [b["tgt_lang_id"] for b in batches]
                 )
+        if self.collate_format == CollateFormat.ordered_dict_simple:
+            example_ds_idx, _ = next(iter(samples))
+            return OrderedDict([(self.keys[example_ds_idx], batch)])
         return batch
 
     @property

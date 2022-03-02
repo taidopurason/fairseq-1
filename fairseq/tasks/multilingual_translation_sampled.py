@@ -11,9 +11,12 @@ from fairseq import utils
 from fairseq.tasks import register_task
 from fairseq.tasks.multilingual_translation import MultilingualTranslationTask
 from fairseq.tasks.translation import load_langpair_dataset
-from fairseq.utils import csv_str_list
+from fairseq.utils import check_lang_groups, csv_str_list, list_of_csv_str_lists
 
 from ..data import FairseqDataset, data_utils, iterators
+from ..data.multilingual.grouped_sampled_multilingual_dataset import (
+    GroupedSampledMultilingualDataset,
+)
 from ..data.multilingual.sampled_multi_dataset import CollateFormat
 from ..data.multilingual.sampled_multilingual_dataset import SampledMultilingualDataset
 from ..data.multilingual.sampling_method import SamplingMethod
@@ -39,6 +42,16 @@ class SampledMultilingualTranslationTask(MultilingualTranslationTask):
             default=None,
             type=csv_str_list,
             help="language pairs that will be used for evaluating the model. --lang-pairs are used by default.",
+        )
+        parser.add_argument(
+            "--src-data-lang-groups",
+            default=None,
+            type=list_of_csv_str_lists,
+        )
+        parser.add_argument(
+            "--tgt-data-lang-groups",
+            default=None,
+            type=list_of_csv_str_lists,
         )
 
     def __init__(self, args, dicts, training):
@@ -100,16 +113,35 @@ class SampledMultilingualTranslationTask(MultilingualTranslationTask):
             else sampling_method([len(dataset) for dataset in datasets.values()])
         )
 
-        self.datasets[split] = SampledMultilingualDataset(
-            datasets,
-            epoch=epoch,
-            sampling_ratios=ratios,
-            seed=self.args.seed,
-            collate_format=CollateFormat.ordered_dict,
-            eval_key=None
-            if self.training
-            else f"{self.args.source_lang}-{self.args.target_lang}",
-        )
+        if (
+            self.args.src_data_lang_groups is not None
+            or self.args.tgt_data_lang_groups is not None
+        ):
+            check_lang_groups(self.args.src_data_lang_groups)
+            check_lang_groups(self.args.tgt_data_lang_groups)
+            self.datasets[split] = GroupedSampledMultilingualDataset(
+                datasets,
+                epoch=epoch,
+                sampling_ratios=ratios,
+                seed=self.args.seed,
+                collate_format=CollateFormat.ordered_dict_simple,
+                eval_key=None
+                if self.training
+                else f"{self.args.source_lang}-{self.args.target_lang}",
+                src_lang_groups=self.args.src_data_lang_groups,
+                tgt_lang_groups=self.args.tgt_data_lang_groups,
+            )
+        else:
+            self.datasets[split] = SampledMultilingualDataset(
+                datasets,
+                epoch=epoch,
+                sampling_ratios=ratios,
+                seed=self.args.seed,
+                collate_format=CollateFormat.ordered_dict,
+                eval_key=None
+                if self.training
+                else f"{self.args.source_lang}-{self.args.target_lang}",
+            )
 
     # needs to be overridden to work with SampledMultiDataset
     def max_positions(self):

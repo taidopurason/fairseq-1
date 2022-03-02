@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import collections
 import contextlib
 import copy
 import importlib
@@ -12,12 +13,11 @@ import os
 import sys
 import warnings
 from itertools import accumulate
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-import collections
 
 if TYPE_CHECKING:
     from fairseq.modules.multihead_attention import MultiheadAttention
@@ -85,7 +85,9 @@ def apply_to_sample(f, sample):
             return f(x)
         elif isinstance(x, collections.OrderedDict):
             # OrderedDict has attributes that needs to be preserved
-            od = collections.OrderedDict((key, _apply(value)) for key, value in x.items())
+            od = collections.OrderedDict(
+                (key, _apply(value)) for key, value in x.items()
+            )
             od.__dict__ = x.__dict__
             return od
         elif isinstance(x, dict):
@@ -536,6 +538,7 @@ def deprecation_warning(message, stacklevel=3):
     # don't use DeprecationWarning, since it's ignored by default
     warnings.warn(message, stacklevel=stacklevel)
 
+
 def relu_squared(x: torch.Tensor):
     return F.relu(x).pow(2)
 
@@ -709,6 +712,7 @@ def get_tpu_device():
 def tpu_data_loader(itr):
     import torch_xla.core.xla_model as xm
     import torch_xla.distributed.parallel_loader as pl
+
     from fairseq.data import iterators
 
     xm.rendezvous("tpu_data_loader")  # wait for all workers
@@ -832,3 +836,17 @@ def safe_getattr(obj, k, default=None):
 def safe_hasattr(obj, k):
     """Returns True if the given key exists and is not None."""
     return getattr(obj, k, None) is not None
+
+
+def list_of_csv_str_lists(arg: Optional[str]) -> Optional[List[List[str]]]:
+    """
+    :param arg: string with semicolon separated comma delimited lists, e.g "et,fi;de,en;lt,lv"
+    :return: None, if argument is None, else list of lists, e.g. [["et", "fi"], ["de", "en"], ["lt", "lv"]]
+    """
+    return None if arg is None else list(map(lambda x: x.split(","), arg.split(";")))
+
+
+def check_lang_groups(lang_groups: List[List[str]]):
+    langs = [lang for langs in lang_groups for lang in langs]
+    if len(langs) != len(set(langs)):
+        raise ValueError("Overlapping lang-groups or duplicate languages.")
