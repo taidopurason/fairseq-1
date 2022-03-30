@@ -1,3 +1,21 @@
+Added features:
+* multilingual modular architecture additions (see *multilingual_transformer*):
+  * modular model language group modules
+  * layer sharing in the encoder of the modular model
+  * reduced size for modular model saving: save only encoders and decoders, not language-pair modules
+  * language-specific embedding sharing
+* modular model training options (see *multilingual_translation_sampled* task):
+  * different options for training data sampling (e.g. temperature)
+  * batch creation:
+    * each batch contains samples from one language-pair
+    * each batch contains samples from one language-group-pair (if using language-group modules)
+
+---
+
+Original README below:
+
+---
+
 <p align="center">
   <img src="docs/fairseq_logo.png" width="150">
   <br />
