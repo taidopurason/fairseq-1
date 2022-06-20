@@ -19,6 +19,8 @@ EMBED_LAYER_NAMES = (
     "decoder.output_projection.weight",  # might be present sometimes
 )
 
+ILLEGAL_CHARS = {" ", "\n", "\r", ""}
+
 
 def read_dict(path: str) -> List[Tuple[str, str]]:
     with open(path, "r", encoding="utf-8") as f:
@@ -37,7 +39,7 @@ def preprocess_tokens(
     return [
         token
         for token in list(OrderedDict.fromkeys(tokens))
-        if token not in data_dict_tokens
+        if token not in data_dict_tokens and token not in ILLEGAL_CHARS
     ]
 
 
