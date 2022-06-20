@@ -44,35 +44,21 @@ def add_pieces(model: ModelProto, new_pieces: Iterable[str]):
 
 
 def main(args):
-    filter_method = None
-    if args.latin_filter:
-        from alphabet_detector import AlphabetDetector
-
-        ad = AlphabetDetector()
-        filter_method = lambda piece: ad.is_latin(piece.lstrip("▁"))
-
-    if args.add_tokens_path is not None:
-        with open(args.add_tokens_path, "r", encoding="utf-8") as f:
-            tokens_to_add = [line.rstrip() for line in f]
-    else:
-        tokens_to_add = []
-
     model = ModelProto()
     with open(args.model_path, "rb") as f:
         model.ParseFromString(f.read())
 
-    if filter_method is not None:
-        new_model = filter_sp_model(model, filter_method)
-        removed_pieces = set(p.piece for p in model.pieces) - set(
-            p.piece for p in new_model.pieces
-        )
-        with open(args.output_prefix + ".removed", "w", encoding="utf-8") as f:
-            for p in removed_pieces:
-                f.write(p + "\n")
+    if args.remove_tokens_path is not None:
+        with open(args.remove_tokens_path, "r", encoding="utf-8") as f:
+            remove_tokens = {line.rstrip() for line in f}
+            new_model = filter_sp_model(model, lambda token: token not in remove_tokens)
     else:
         new_model = model
 
-    add_pieces(new_model, tokens_to_add)
+    if args.add_tokens_path is not None:
+        with open(args.add_tokens_path, "r", encoding="utf-8") as f:
+            tokens_to_add = [line.rstrip() for line in f]
+            add_pieces(new_model, tokens_to_add)
 
     with open(args.output_prefix + ".model", "wb") as f:
         f.write(new_model.SerializeToString())
@@ -89,10 +75,12 @@ if __name__ == "__main__":
     parser.add_argument("--model-path", required=True, help="Path to the sp model.")
     parser.add_argument("--output-prefix", required=True, help="Output prefix.")
     parser.add_argument(
-        "--latin-filter", action="store_true", help="Filter out non-latin tokens."
+        "--add-tokens-path",
+        default=None,
+        help="File which contains the tokens that will be added (1 token per line).",
     )
     parser.add_argument(
-        "--add-tokens-path",
+        "--remove-tokens-path",
         default=None,
         help="File which contains the tokens that will be added (1 token per line).",
     )

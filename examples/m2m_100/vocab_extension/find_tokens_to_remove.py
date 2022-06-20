@@ -33,15 +33,15 @@ def main(args):
         from sentencepiece.sentencepiece_model_pb2 import ModelProto
 
         model = ModelProto()
-        with open(args.model_path, "rb") as f:
+        with open(args.input, "rb") as f:
             model.ParseFromString(f.read())
 
-            tokens = tuple(p.piece for p in model.pieces)
+            tokens = tuple(p.piece for p in model.pieces if p.type == 1)
     else:
         raise ValueError("Unknown input type")
 
     with open(args.output, "w", encoding="utf-8") as f:
-        for token in filter(filter_method, tokens):
+        for token in filter(lambda x: not filter_method(x), tokens):
             f.write(token + "\n")
 
 
