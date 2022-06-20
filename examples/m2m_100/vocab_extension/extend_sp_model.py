@@ -3,7 +3,7 @@ from typing import Callable, Iterable
 
 from sentencepiece.sentencepiece_model_pb2 import ModelProto
 
-ILLEGAL_CHARS = {" ", "\n", "\r"}
+ILLEGAL_CHARS = {" ", "\n", "\r", ""}
 
 
 def is_special_piece(piece: ModelProto.SentencePiece) -> bool:
@@ -37,9 +37,10 @@ def add_pieces(model: ModelProto, new_pieces: Iterable[str]):
     score = min(p.score for p in model.pieces) - 1
     vocab = {p.piece for p in model.pieces}
 
-    for ns in new_pieces:
-        if ns not in vocab and ns not in ILLEGAL_CHARS:
-            model.pieces.append(ModelProto.SentencePiece(piece=ns, score=score))
+    for piece in new_pieces:
+        if piece not in vocab and piece not in ILLEGAL_CHARS:
+            model.pieces.append(ModelProto.SentencePiece(piece=piece, score=score))
+            vocab.add(piece)
             score -= 1
 
 
