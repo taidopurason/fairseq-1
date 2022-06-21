@@ -84,7 +84,7 @@ def remove_tokens(tokens_to_filter, state_dict, model_dict_entries, data_dict_en
 
     mask = torch.ones(num_entries).bool()
     if len(tokens_to_filter) > 0:
-        dict_mask = [token not in tokens_to_filter for (token, _) in model_dict_entries]
+        dict_mask = [token not in tokens_to_filter for (token, _) in data_dict_entries]
         # First 4 entries are bos, pad, eos, unk
         mask[4 : len(dict_mask) + 4] = torch.tensor(dict_mask).bool()
 
@@ -98,10 +98,11 @@ def remove_tokens(tokens_to_filter, state_dict, model_dict_entries, data_dict_en
             )
 
     model_dict_entries[:] = [
-        entry for entry in model_dict_entries if entry[0] not in tokens_to_filter
-    ]
+        entry for is_kept, entry in zip(dict_mask, model_dict_entries) if is_kept
+    ] + model_dict_entries[len(dict_mask) :]
+
     data_dict_entries[:] = [
-        entry for entry in data_dict_entries if entry[0] not in tokens_to_filter
+        entry for is_kept, entry in zip(dict_mask, data_dict_entries) if is_kept
     ]
 
 
