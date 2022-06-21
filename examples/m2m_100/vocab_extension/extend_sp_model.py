@@ -2,35 +2,23 @@ import argparse
 from typing import Callable, Iterable
 
 from sentencepiece.sentencepiece_model_pb2 import ModelProto
+from tqdm import tqdm
 
 ILLEGAL_CHARS = {" ", "\n", "\r", ""}
 
 
-def is_special_piece(piece: ModelProto.SentencePiece) -> bool:
-    return piece.type != 1
-
-
-def filter_sp_model(
-    model: ModelProto, filter_method: Callable[[str], bool]
-) -> ModelProto:
-    new_model = ModelProto()
-
+def filter_sp_model(model: ModelProto, filter_method: Callable[[str], bool]):
     score_cntr = 0.0
-    for piece in model.pieces:
-        if is_special_piece(piece):
-            new_model.pieces.append(
-                ModelProto.SentencePiece(
-                    piece=piece.piece, score=score_cntr, type=piece.type
-                )
-            )
+    pieces = list(model.pieces)
+    del model.pieces[:]
+
+    for piece in pieces:
+        if piece.type != 1:
+            model.pieces.append(piece)
         elif filter_method(piece.piece):
-            new_model.pieces.append(
-                ModelProto.SentencePiece(
-                    piece=piece.piece, score=score_cntr * -1.0, type=piece.type
-                )
-            )
+            piece.score = score_cntr * -1.0
+            model.pieces.append(piece)
             score_cntr += 1
-    return new_model
 
 
 def add_pieces(model: ModelProto, new_pieces: Iterable[str]):
@@ -44,28 +32,31 @@ def add_pieces(model: ModelProto, new_pieces: Iterable[str]):
             score -= 1
 
 
-def main(args):
+def read_model(path: str):
     model = ModelProto()
-    with open(args.model_path, "rb") as f:
+    with open(path, "rb") as f:
         model.ParseFromString(f.read())
+    return model
+
+
+def main(args):
+    model = read_model(args.model_path)
 
     if args.remove_tokens_path is not None:
         with open(args.remove_tokens_path, "r", encoding="utf-8") as f:
             remove_tokens = {line.rstrip() for line in f}
-            new_model = filter_sp_model(model, lambda token: token not in remove_tokens)
-    else:
-        new_model = model
+            filter_sp_model(model, lambda token: token not in remove_tokens)
 
     if args.add_tokens_path is not None:
         with open(args.add_tokens_path, "r", encoding="utf-8") as f:
             tokens_to_add = [line.rstrip() for line in f]
-            add_pieces(new_model, tokens_to_add)
+            add_pieces(model, tokens_to_add)
 
     with open(args.output_prefix + ".model", "wb") as f:
-        f.write(new_model.SerializeToString())
+        f.write(model.SerializeToString())
 
     with open(args.output_prefix + ".vocab", "w", encoding="utf-8") as f:
-        for p in new_model.pieces:
+        for p in model.pieces:
             f.write(f"{p.piece}\t{int(p.score)}\n")
 
 
