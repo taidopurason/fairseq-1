@@ -68,7 +68,15 @@ def add_tokens(tokens_to_add, state_dict, model_dict_entries, data_dict_entries)
             embeds = state_dict[embed_layer]
             logger.info(f"{embed_layer} {len(embeds)} entries before adding tokens")
             state_dict[embed_layer] = torch.cat(
-                [embeds[:model_insert_idx], new_weights, embeds[model_insert_idx:]]
+                [
+                    embeds[:model_insert_idx],
+                    (
+                        new_weights.half()
+                        if embeds.dtype == torch.float16
+                        else new_weights
+                    ),
+                    embeds[model_insert_idx:],
+                ]
             )
             logger.info(
                 f"{embed_layer} {len(state_dict[embed_layer])} entries after adding tokens"
