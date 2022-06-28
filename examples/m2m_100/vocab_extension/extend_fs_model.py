@@ -13,10 +13,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("extend_fs_model")
 
+ENCODER_EMBED_NAME = "encoder.embed_tokens.weight"
+DECODER_EMBED_NAME = "decoder.embed_tokens.weight"
+OUT_PROJ_NAME = "decoder.output_projection.weight"
+
 EMBED_LAYER_NAMES = (
-    "encoder.embed_tokens.weight",
-    "decoder.embed_tokens.weight",
-    "decoder.output_projection.weight",  # might be present sometimes
+    ENCODER_EMBED_NAME,
+    DECODER_EMBED_NAME,
+    OUT_PROJ_NAME,  # might be present sometimes
 )
 
 ILLEGAL_CHARS = {" ", "\n", "\r", ""}
@@ -43,7 +47,9 @@ def preprocess_tokens(
     ]
 
 
-def add_tokens(tokens_to_add, state_dict, model_dict_entries, data_dict_entries):
+def add_tokens(
+    tokens_to_add, state_dict, model_dict_entries, data_dict_entries, init_std=None
+):
     if len(tokens_to_add) == 0:
         logger.info(f"No tokens to add.")
         return
@@ -59,25 +65,24 @@ def add_tokens(tokens_to_add, state_dict, model_dict_entries, data_dict_entries)
     data_dict_entries[:] = [*data_dict_entries, *entries_to_add]
 
     model_insert_idx = insert_idx + 4
-    new_weights = torch.normal(
-        torch.zeros(len(entries_to_add), embedding_dim), std=embedding_dim ** -0.5
-    )
 
     for embed_layer in EMBED_LAYER_NAMES:
         if embed_layer in state_dict:
             embeds = state_dict[embed_layer]
             logger.info(f"{embed_layer} {len(embeds)} entries before adding tokens")
-            state_dict[embed_layer] = torch.cat(
-                [
-                    embeds[:model_insert_idx],
-                    (
-                        new_weights.half()
-                        if embeds.dtype == torch.float16
-                        else new_weights
-                    ),
-                    embeds[model_insert_idx:],
-                ]
+
+            new_weights = torch.normal(
+                torch.zeros(len(entries_to_add), embedding_dim),
+                std=embedding_dim ** -0.5 if init_std is None else init_std,
             )
+            state_dict[embed_layer] = (
+                torch.cat(
+                    [embeds[:model_insert_idx], new_weights, embeds[model_insert_idx:]]
+                )
+                .to(embeds.device, dtype=embeds.dtype)
+                .clone()
+            )
+
             logger.info(
                 f"{embed_layer} {len(state_dict[embed_layer])} entries after adding tokens"
             )
@@ -100,7 +105,8 @@ def remove_tokens(tokens_to_filter, state_dict, model_dict_entries, data_dict_en
         if embed_layer in state_dict:
             embeds = state_dict[embed_layer]
             logger.info(f"{embed_layer} {len(embeds)} entries before removing tokens")
-            state_dict[embed_layer] = embeds[mask]
+
+            state_dict[embed_layer] = embeds[mask].clone()
             logger.info(
                 f"{embed_layer} {len(state_dict[embed_layer])} entries after removing tokens"
             )
@@ -112,6 +118,26 @@ def remove_tokens(tokens_to_filter, state_dict, model_dict_entries, data_dict_en
     data_dict_entries[:] = [
         entry for is_kept, entry in zip(dict_mask, data_dict_entries) if is_kept
     ]
+
+
+def share_layers(state_dict, share_all_embeddings, share_decoder_input_output_embed):
+    if share_all_embeddings:
+        shared_embed = None
+        for name in EMBED_LAYER_NAMES:
+            if name not in state_dict:
+                continue
+
+            if shared_embed is None:
+                shared_embed = state_dict[name]
+            else:
+                state_dict[name] = shared_embed[:]
+
+    elif (
+        share_decoder_input_output_embed
+        and OUT_PROJ_NAME in state_dict
+        and DECODER_EMBED_NAME in state_dict
+    ):
+        state_dict[OUT_PROJ_NAME] = state_dict[DECODER_EMBED_NAME][:]
 
 
 def save_dict_entries(dict_entries, path):
@@ -154,11 +180,25 @@ def main(args):
 
     checkpoint = torch.load(args.model_path, map_location=torch.device("cpu"))
     model_state_dict = checkpoint["model"]
+    model_args = checkpoint["args"] if "args" in checkpoint else checkpoint["cfg"]
 
     remove_tokens(
         tokens_to_filter, model_state_dict, model_dict_entries, data_dict_entries
     )
-    add_tokens(tokens_to_add, model_state_dict, model_dict_entries, data_dict_entries)
+    add_tokens(
+        tokens_to_add,
+        model_state_dict,
+        model_dict_entries,
+        data_dict_entries,
+        init_std=args.init_std,
+    )
+
+    if len(tokens_to_add) > 0 and len(tokens_to_filter) > 0:
+        share_layers(
+            model_state_dict,
+            getattr(model_args, "share_all_embeddings", False),
+            getattr(model_args, "share_decoder_input_output_embed", False),
+        )
 
     with PathManager.open(args.model_out_path, "wb") as f:
         torch.save(checkpoint, f)
@@ -198,6 +238,10 @@ if __name__ == "__main__":
         "--remove-tokens-path",
         default=None,
         help="File which contains the tokens that will be removed (1 token per line).",
+    )
+
+    parser.add_argument(
+        "--init-std", type=float, default=None, help="Initial std for new model weights"
     )
 
     args = parser.parse_args()
