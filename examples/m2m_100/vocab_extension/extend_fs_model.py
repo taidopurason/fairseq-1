@@ -193,7 +193,7 @@ def main(args):
         init_std=args.init_std,
     )
 
-    if len(tokens_to_add) > 0 and len(tokens_to_filter) > 0:
+    if len(tokens_to_add) > 0 or len(tokens_to_filter) > 0:
         share_layers(
             model_state_dict,
             getattr(model_args, "share_all_embeddings", False),
