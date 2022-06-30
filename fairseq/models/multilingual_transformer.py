@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 from argparse import Namespace
 from collections import OrderedDict, defaultdict
-from typing import Dict, List, Optional
+from typing import Dict
 
 from fairseq import utils
 from fairseq.models import (
@@ -20,7 +20,57 @@ from fairseq.models.transformer import (
     base_architecture,
 )
 from fairseq.modules import TransformerEncoderLayer
-from fairseq.utils import check_lang_groups, list_of_csv_str_lists, safe_hasattr
+from fairseq.utils import (
+    check_lang_groups,
+    csv_int_list,
+    list_of_csv_str_lists,
+    safe_hasattr,
+)
+
+
+class DecoderLayerSharingManager:
+    def __init__(self, args: Namespace):
+        self.shared_layer_ids = (
+            tuple(args.shared_decoder_layers)
+            if args.shared_decoder_layers is not None
+            else tuple()
+        )
+        self.shared_layer_modules = None
+
+    @staticmethod
+    def add_args(parser):
+        parser.add_argument(
+            "--shared-decoder-layers",
+            type=csv_int_list,
+            help="Layer indices of layers to share",
+        )
+
+    @staticmethod
+    def base_architecture(args):
+        args.shared_decoder_layers = getattr(args, "shared_decoder_layers", None)
+
+    @property
+    def is_sharing(self):
+        return len(self.shared_layer_ids) > 0
+
+    def _update_shared_layers(self, model: TransformerDecoder):
+        # Updates the internal state with shared layers of the specified lang
+        if len(self.shared_layer_ids) > 0 and self.shared_layer_modules is None:
+            self.shared_layer_modules = {}
+            for id in self.shared_layer_ids:
+                self.shared_layer_modules[id] = model.layers[id]
+
+    def _write_shared_layers(
+        self,
+        model: TransformerDecoder,
+    ):
+        for i, module in self.shared_layer_modules.items():
+            model.layers[i] = module
+
+    def share_layers(self, model: TransformerDecoder):
+        if self.shared_layer_modules is not None:
+            self._write_shared_layers(model)
+        self._update_shared_layers(model)
 
 
 class EncoderLayerSharingManager:
@@ -150,6 +200,7 @@ class MultilingualTransformerModel(FairseqMultiModel):
         """Add model-specific arguments to the parser."""
         TransformerModel.add_args(parser)
         EncoderLayerSharingManager.add_args(parser)
+        DecoderLayerSharingManager.add_args(parser)
         parser.add_argument(
             "--share-encoder-embeddings",
             action="store_true",
@@ -287,6 +338,7 @@ class MultilingualTransformerModel(FairseqMultiModel):
         lang_encoders, lang_decoders = {}, {}
 
         encoder_sharing_manager = EncoderLayerSharingManager(args)
+        decoder_sharing_manager = DecoderLayerSharingManager(args)
 
         def get_encoder(lang):
             if lang not in lang_encoders:
@@ -323,6 +375,8 @@ class MultilingualTransformerModel(FairseqMultiModel):
                 lang_decoders[lang] = cls._get_module_class(
                     False, args, task.dicts[lang], decoder_embed_tokens, tgt_langs
                 )
+                if decoder_sharing_manager.is_sharing:
+                    decoder_sharing_manager.share_layers(lang_decoders[lang])
             return lang_decoders[lang]
 
         # shared encoders/decoders (if applicable)
@@ -426,6 +480,8 @@ class MultilingualTransformerModel(FairseqMultiModel):
 
             if new_key not in new_state_dict:
                 new_state_dict[new_key] = v
+            else:
+                print("exists")
 
         return new_state_dict
 
@@ -449,6 +505,7 @@ def base_multilingual_architecture(args):
     args.reduced_state_dict = getattr(args, "reduced_state_dict", False)
     args.lang_group_modules = getattr(args, "lang_group_modules", None)
     EncoderLayerSharingManager.base_architecture(args)
+    DecoderLayerSharingManager.base_architecture(args)
 
 
 @register_model_architecture(

@@ -780,6 +780,10 @@ def csv_str_list(x):
     return x.split(",")
 
 
+def csv_int_list(x):
+    return list(map(int, x.split(",")))
+
+
 def eval_str_list(x, type=float):
     if x is None:
         return None

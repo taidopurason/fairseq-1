@@ -7,6 +7,7 @@ import torch
 
 from fairseq.models import multilingual_transformer
 from fairseq.tasks.multilingual_translation import MultilingualTranslationTask
+from fairseq.utils import csv_int_list
 from tests.utils import dummy_dictionary
 
 
@@ -175,3 +176,28 @@ class MultilingualTransformerTestCase(unittest.TestCase):
                     modules[group] = l
                 else:
                     assert modules[group] == l
+
+    def test_sharing_decoder_layers(self):
+        shared_decoder_layers = csv_int_list("0,1,4,5")
+        n_decoder_layers = 6
+        model = mk_transformer(
+            self.langs,
+            self.lang_pairs,
+            **{
+                "shared_decoder_layers": shared_decoder_layers,
+                "decoder_layers": n_decoder_layers,
+            },
+        )
+        for n in range(n_decoder_layers):
+            shared_layer = None
+            shared_lang = None
+            for lang_pair in self.lang_pairs:
+                layer = model.models[lang_pair].decoder.layers[n]
+                lang = lang_pair.split("-")[1]
+                if shared_layer is None:
+                    shared_layer = layer
+                    shared_lang = lang
+                elif n in shared_decoder_layers or lang == shared_lang:
+                    assert shared_layer == layer
+                else:
+                    assert shared_layer != layer
