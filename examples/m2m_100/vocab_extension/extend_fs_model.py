@@ -180,7 +180,11 @@ def main(args):
 
     checkpoint = torch.load(args.model_path, map_location=torch.device("cpu"))
     model_state_dict = checkpoint["model"]
-    model_args = checkpoint["args"] if "args" in checkpoint else checkpoint["cfg"]
+    model_args = (
+        checkpoint["args"]
+        if "args" in checkpoint and checkpoint["args"] is not None
+        else checkpoint["cfg"]["model"]
+    )
 
     remove_tokens(
         tokens_to_filter, model_state_dict, model_dict_entries, data_dict_entries
