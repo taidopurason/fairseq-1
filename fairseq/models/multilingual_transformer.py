@@ -480,8 +480,6 @@ class MultilingualTransformerModel(FairseqMultiModel):
 
             if new_key not in new_state_dict:
                 new_state_dict[new_key] = v
-            else:
-                print("exists")
 
         return new_state_dict
 
