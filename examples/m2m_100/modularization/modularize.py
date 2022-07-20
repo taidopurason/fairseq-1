@@ -71,6 +71,9 @@ def main(args):
         cfg[cfg_name].arch = args.new_arch_name
         cfg[cfg_name].lang_pairs = lang_pairs
 
+    checkpoint["cfg"] = cfg
+    checkpoint["args"] = None
+
     logger.info(f"writing model to {args.output_path}")
     with PathManager.open(args.output_path, "wb") as f:
         torch.save(checkpoint, f)
