@@ -16,10 +16,13 @@ def main(args):
     modular_decoder_layers = args.decoder_modular_layers
     lang_pairs = args.lang_pairs
 
+    langs = [lang for lp in lang_pairs for lang in lp.split("-")]
+
     logger.info(f"reading model from {args.model_path}")
     with PathManager.open(args.model_path, "rb") as f:
         checkpoint = torch.load(f, map_location=torch.device("cpu"))
 
+    language_specific_modules = {lang: {} for lang in langs}
     new_model_state = {}
     for key, value in checkpoint["model"].items():
         module_type, *rest = key.split(".")
@@ -31,8 +34,10 @@ def main(args):
 
         if module_type == "encoder":
             modular_layer_nums = modular_encoder_layers
+            get_module_lang = lambda x: x.split("-")[0]
         elif module_type == "decoder":
             modular_layer_nums = modular_decoder_layers
+            get_module_lang = lambda x: x.split("-")[1]
         else:
             raise Exception("Unknown module type.")
 
@@ -44,15 +49,18 @@ def main(args):
 
         for lang_pair in args.lang_pairs:
             new_key = f"models.{lang_pair}.{key}"
+            lang = get_module_lang(lang_pair)
 
             logger.debug(
                 f"{key} -> {new_key} ({'cloned' if clone_layer else 'shared'})"
             )
 
             if clone_layer:
-                new_model_state[new_key] = value.detach().clone()
+                if key not in language_specific_modules[lang]:
+                    language_specific_modules[lang][key] = value.detach().clone()
+                new_model_state[new_key] = language_specific_modules[lang][key]
             else:
-                new_model_state[new_key] = value[:]
+                new_model_state[new_key] = value
 
     checkpoint["model"] = new_model_state
 
