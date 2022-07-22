@@ -6,10 +6,11 @@
 import contextlib
 import logging
 import os
-from collections import OrderedDict
 from argparse import ArgumentError
+from collections import OrderedDict
 
 import torch
+
 from fairseq import metrics, options, utils
 from fairseq.data import (
     Dictionary,
@@ -21,7 +22,6 @@ from fairseq.models import FairseqMultiModel
 from fairseq.tasks.translation import load_langpair_dataset
 
 from . import LegacyFairseqTask, register_task
-
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +94,12 @@ class MultilingualTranslationTask(LegacyFairseqTask):
                                  'language token. (src/tgt)')
         parser.add_argument('--decoder-langtok', action='store_true',
                             help='replace beginning-of-sentence in target sentence with target language token')
+        parser.add_argument(
+            "--fixed-dictionary",
+            help="Fixed dictionary to use with model path",
+            default=None,
+            type=str,
+        )
         # fmt: on
 
     def __init__(self, args, dicts, training):
@@ -146,20 +152,25 @@ class MultilingualTranslationTask(LegacyFairseqTask):
 
         # load dictionaries
         dicts = OrderedDict()
-        for lang in sorted_langs:
-            paths = utils.split_paths(args.data)
-            assert len(paths) > 0
-            dicts[lang] = cls.load_dictionary(
-                os.path.join(paths[0], "dict.{}.txt".format(lang))
-            )
-            if len(dicts) > 0:
-                assert dicts[lang].pad() == dicts[sorted_langs[0]].pad()
-                assert dicts[lang].eos() == dicts[sorted_langs[0]].eos()
-                assert dicts[lang].unk() == dicts[sorted_langs[0]].unk()
-            if args.encoder_langtok is not None or args.decoder_langtok:
-                for lang_to_add in sorted_langs:
-                    dicts[lang].add_symbol(_lang_token(lang_to_add))
-            logger.info("[{}] dictionary: {} types".format(lang, len(dicts[lang])))
+        if args.fixed_dictionary is not None:
+            fixed_dict = cls.load_dictionary(args.fixed_dictionary)
+            for lang in sorted_langs:
+                dicts[lang] = fixed_dict
+        else:
+            for lang in sorted_langs:
+                paths = utils.split_paths(args.data)
+                assert len(paths) > 0
+                dicts[lang] = cls.load_dictionary(
+                    os.path.join(paths[0], "dict.{}.txt".format(lang))
+                )
+                if len(dicts) > 0:
+                    assert dicts[lang].pad() == dicts[sorted_langs[0]].pad()
+                    assert dicts[lang].eos() == dicts[sorted_langs[0]].eos()
+                    assert dicts[lang].unk() == dicts[sorted_langs[0]].unk()
+                if args.encoder_langtok is not None or args.decoder_langtok:
+                    for lang_to_add in sorted_langs:
+                        dicts[lang].add_symbol(_lang_token(lang_to_add))
+                logger.info("[{}] dictionary: {} types".format(lang, len(dicts[lang])))
         return dicts, training
 
     def get_encoder_langtok(self, src_lang, tgt_lang):
