@@ -427,22 +427,36 @@ class MultilingualTransformerModel(FairseqMultiModel):
     def _is_reduced_state_dict(state_dict):
         return any(
             map(
-                lambda k: k.startswith("encoders.") or k.startswith("decoders."),
+                lambda k: (
+                    k.startswith("encoders.")
+                    or k.startswith("encoder.")
+                    or k.startswith("decoders.")
+                    or k.startswith("decoder.")
+                ),
                 state_dict.keys(),
             )
         )
 
     @staticmethod
     def restore_reduced_state_dict(state_dict, lang_pairs):
-        encoders = defaultdict(lambda: [])
-        decoders = defaultdict(lambda: [])
+        encoders = defaultdict(lambda: OrderedDict())
+        decoders = defaultdict(lambda: OrderedDict())
 
-        for k in state_dict.keys():
-            module, lang, *rest = k.split(".")
-            if module == "encoders":
-                encoders[lang].append(".".join(rest))
+        src_langs = set(lang_pair.split("-")[0] for lang_pair in lang_pairs)
+        tgt_langs = set(lang_pair.split("-")[1] for lang_pair in lang_pairs)
+
+        for k, v in state_dict.items():
+            module, *rest = k.split(".")
+            if module == "encoder":
+                for lang in src_langs:
+                    encoders[lang][".".join(rest)] = v
+            elif module == "decoder":
+                for lang in tgt_langs:
+                    decoders[lang][".".join(rest)] = v
+            elif module == "encoders":
+                encoders[rest[0]][".".join(rest[1:])] = v
             elif module == "decoders":
-                decoders[lang].append(".".join(rest))
+                decoders[rest[0]][".".join(rest[1:])] = v
             else:
                 raise ValueError(
                     f"state must belong to an encoder or a decoder. state={k}"
@@ -451,18 +465,20 @@ class MultilingualTransformerModel(FairseqMultiModel):
         new_state_dict = OrderedDict()
         for lang_pair in lang_pairs:
             src, tgt = lang_pair.split("-")
-            for k in encoders[src]:
-                new_state_dict[f"models.{lang_pair}.encoder.{k}"] = state_dict[
-                    f"encoders.{src}.{k}"
-                ]
-            for k in decoders[tgt]:
-                new_state_dict[f"models.{lang_pair}.decoder.{k}"] = state_dict[
-                    f"decoders.{tgt}.{k}"
-                ]
+            for k, v in encoders[src].items():
+                new_state_dict[f"models.{lang_pair}.encoder.{k}"] = v
+            for k, v in decoders[tgt].items():
+                new_state_dict[f"models.{lang_pair}.decoder.{k}"] = v
         return new_state_dict
 
     @staticmethod
-    def reduce_state_dict(state_dict):
+    def reduce_state_dict(
+        state_dict,
+        share_encoders: bool = False,
+        share_decoders: bool = False,
+        shared_decoder_layers=tuple(),
+        shared_encoder_layers=tuple(),
+    ):
         new_state_dict = OrderedDict()
         for k, v in state_dict.items():
             lang_pair, module, *rest = k.split(".")[1:]
@@ -474,9 +490,26 @@ class MultilingualTransformerModel(FairseqMultiModel):
 
             src, tgt = lang_pair.split("-")
 
-            new_key = (
-                f"{module}s.{src if module == 'encoder' else tgt}.{'.'.join(rest)}"
-            )
+            layer_num = None
+            if rest[0] == "layers":
+                layer_num = int(rest[1])
+
+            if module == "encoder":
+                if share_encoders or (
+                    layer_num is not None and layer_num in shared_encoder_layers
+                ):
+                    prefix = module
+                else:
+                    prefix = f"{module}s.{src}"
+            else:
+                if share_decoders or (
+                    layer_num is not None and layer_num in shared_decoder_layers
+                ):
+                    prefix = module
+                else:
+                    prefix = f"{module}s.{tgt}"
+
+            new_key = f"{prefix}.{'.'.join(rest)}"
 
             if new_key not in new_state_dict:
                 new_state_dict[new_key] = v
@@ -486,7 +519,16 @@ class MultilingualTransformerModel(FairseqMultiModel):
     def state_dict(self, *args, **kwargs):
         state_dict = super().state_dict(*args, **kwargs)
         if self.args.reduced_state_dict:
-            return self.reduce_state_dict(state_dict)
+            return self.reduce_state_dict(
+                state_dict,
+                share_encoders=self.args.share_encoders,
+                share_decoders=self.args.share_decoders,
+                shared_decoder_layers=(
+                    tuple(self.args.shared_decoder_layers)
+                    if self.args.shared_decoder_layers is not None
+                    else tuple()
+                ),
+            )
         return state_dict
 
 
