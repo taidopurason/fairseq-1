@@ -20,6 +20,7 @@ from fairseq.data import (
 )
 from fairseq.models import FairseqMultiModel
 from fairseq.tasks.translation import load_langpair_dataset
+from fairseq.utils import FileContentsAction
 
 from . import LegacyFairseqTask, register_task
 
@@ -69,7 +70,8 @@ class MultilingualTranslationTask(LegacyFairseqTask):
         # fmt: off
         parser.add_argument('data', metavar='DIR', help='path to data directory')
         parser.add_argument('--lang-pairs', default=None, metavar='PAIRS',
-                            help='comma-separated list of language pairs (in training order): en-de,en-fr,de-fr')
+                            help='comma-separated list of language pairs (in training order): en-de,en-fr,de-fr',
+                            action=FileContentsAction)
         parser.add_argument('-s', '--source-lang', default=None, metavar='SRC',
                             help='source language (only needed for inference)')
         parser.add_argument('-t', '--target-lang', default=None, metavar='TARGET',
