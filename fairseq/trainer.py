@@ -12,10 +12,13 @@ import logging
 import sys
 import time
 from argparse import Namespace
+from collections import OrderedDict
 from itertools import chain
 from typing import Any, Dict, List
 
 import torch
+from omegaconf import OmegaConf
+
 from fairseq import checkpoint_utils, models, optim, utils
 from fairseq.dataclass.configs import FairseqConfig
 from fairseq.dataclass.utils import convert_namespace_to_omegaconf
@@ -25,7 +28,6 @@ from fairseq.logging import meters, metrics
 from fairseq.models.ema import build_ema
 from fairseq.nan_detector import NanDetector
 from fairseq.optim import lr_scheduler
-from omegaconf import OmegaConf
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +54,7 @@ class Trainer(object):
         self.task = task
 
         # catalog shared parameters
-        shared_params = _catalog_shared_params(model)
+        self._shared_params = _catalog_shared_params(model)
         self.tpu = cfg.common.tpu
         self.cuda = torch.cuda.is_available() and not cfg.common.cpu and not self.tpu
         if self.cuda:
@@ -119,7 +121,7 @@ class Trainer(object):
             )
 
         # check that shared parameters are preserved after device transfer
-        for shared_param in shared_params:
+        for shared_param in self._shared_params:
             ref = _get_module_by_path(self._model, shared_param[0])
             for path in shared_param[1:]:
                 logger.info(
@@ -337,7 +339,10 @@ class Trainer(object):
             )
 
         if self.cfg.optimization.use_bmuf:
-            self._optimizer = optim.FairseqBMUF(self.cfg.bmuf, self._optimizer,)
+            self._optimizer = optim.FairseqBMUF(
+                self.cfg.bmuf,
+                self._optimizer,
+            )
 
         if self.cfg.distributed_training.zero_sharding == "os":
             if (
@@ -355,7 +360,8 @@ class Trainer(object):
         # We should initialize the learning rate scheduler immediately after
         # building the optimizer, so that the initial learning rate is set.
         self._lr_scheduler = lr_scheduler.build_lr_scheduler(
-            self.cfg.lr_scheduler, self.optimizer,
+            self.cfg.lr_scheduler,
+            self.optimizer,
         )
         self._lr_scheduler.step_update(0)
 
@@ -426,7 +432,11 @@ class Trainer(object):
         """Save all training state in a checkpoint file."""
         logger.info(f"Saving checkpoint to {filename}")
         # call state_dict on all ranks in case it needs internal communication
-        state_dict = utils.move_to_cpu(self.state_dict())
+        state_dict = self.state_dict()
+        state_dict["model"] = _sharing_aware_to_cpu(
+            state_dict["model"], self._shared_params
+        )
+        state_dict = utils.move_to_cpu(state_dict)
         state_dict["extra_state"].update(extra_state)
         if self.should_save_checkpoint_on_current_rank:
             checkpoint_utils.torch_persistent_save(
@@ -652,7 +662,9 @@ class Trainer(object):
         return batch_iterator
 
     def get_valid_iterator(
-        self, subset, disable_iterator_cache=False,
+        self,
+        subset,
+        disable_iterator_cache=False,
     ):
         """Return an EpochBatchIterator over given validation subset for a given epoch."""
         batch_iterator = self.task.get_batch_iterator(
@@ -660,7 +672,8 @@ class Trainer(object):
             max_tokens=self.cfg.dataset.max_tokens_valid,
             max_sentences=self.cfg.dataset.batch_size_valid,
             max_positions=utils.resolve_max_positions(
-                self.task.max_positions(), self.model.max_positions(),
+                self.task.max_positions(),
+                self.model.max_positions(),
             ),
             ignore_invalid_inputs=self.cfg.dataset.skip_invalid_size_inputs_valid_test,
             required_batch_size_multiple=self.cfg.dataset.required_batch_size_multiple,
@@ -809,7 +822,11 @@ class Trainer(object):
             train_time = self._local_cumulative_training_time()
             (
                 logging_outputs,
-                (sample_size, ooms, total_train_time,),
+                (
+                    sample_size,
+                    ooms,
+                    total_train_time,
+                ),
             ) = self._aggregate_logging_outputs(
                 logging_outputs, sample_size, ooms, train_time, ignore=is_dummy_batch
             )
@@ -924,7 +941,8 @@ class Trainer(object):
             if self.cfg.ema.store_ema:
                 # Step EMA forward with new model.
                 self.ema.step(
-                    self.get_model(), self.get_num_updates(),
+                    self.get_model(),
+                    self.get_num_updates(),
                 )
                 metrics.log_scalar(
                     "ema_decay",
@@ -1058,7 +1076,9 @@ class Trainer(object):
         # gather logging outputs from all replicas
         if self.data_parallel_world_size > 1:
             logging_outputs, (sample_size,) = self._aggregate_logging_outputs(
-                logging_outputs, sample_size, ignore=is_dummy_batch,
+                logging_outputs,
+                sample_size,
+                ignore=is_dummy_batch,
             )
 
         # log validation stats
@@ -1260,9 +1280,10 @@ class Trainer(object):
             return False
         elif self.cfg.optimization.use_bmuf:
             return (
-                (self.get_num_updates() + 1) % self.cfg.bmuf.global_sync_iter == 0
-                and (self.get_num_updates() + 1) > self.cfg.bmuf.warmup_iterations
-            )
+                self.get_num_updates() + 1
+            ) % self.cfg.bmuf.global_sync_iter == 0 and (
+                self.get_num_updates() + 1
+            ) > self.cfg.bmuf.warmup_iterations
         else:
             return True
 
@@ -1275,7 +1296,10 @@ class Trainer(object):
         sys.stderr.flush()
 
     def _aggregate_logging_outputs(
-        self, logging_outputs: List[Dict[str, Any]], *extra_stats_to_sum, ignore=False,
+        self,
+        logging_outputs: List[Dict[str, Any]],
+        *extra_stats_to_sum,
+        ignore=False,
     ):
         if self.task.__class__.logging_outputs_can_be_summed(self.get_criterion()):
             return self._fast_stat_sync_sum(
@@ -1287,7 +1311,10 @@ class Trainer(object):
             )
 
     def _all_gather_list_sync(
-        self, logging_outputs: List[Dict[str, Any]], *extra_stats_to_sum, ignore=False,
+        self,
+        logging_outputs: List[Dict[str, Any]],
+        *extra_stats_to_sum,
+        ignore=False,
     ):
         """
         Sync logging outputs across workers. all_gather_list_sync is
@@ -1312,7 +1339,10 @@ class Trainer(object):
         return logging_outputs, extra_stats_to_sum
 
     def _fast_stat_sync_sum(
-        self, logging_outputs: List[Dict[str, Any]], *extra_stats_to_sum, ignore=False,
+        self,
+        logging_outputs: List[Dict[str, Any]],
+        *extra_stats_to_sum,
+        ignore=False,
     ):
         """
         Sync logging outputs across workers. fast_stat_sync_sum is
@@ -1455,6 +1485,34 @@ class Trainer(object):
             from fairseq.utils import xla_device_to_cpu
 
             return xla_device_to_cpu(data)
+
+
+def _sharing_aware_to_cpu(module_state_dict, shared_parameters):
+    if len(shared_parameters) == 0:
+        return module_state_dict
+
+    memo = {}
+    for names in shared_parameters:
+        name = names[0]
+        if name not in module_state_dict:
+            continue
+
+        value = utils.move_to_cpu(module_state_dict[name])
+        for name in names:
+            memo[name] = value
+
+    if len(memo) == 0:
+        return module_state_dict
+
+    new_state = OrderedDict(
+        (
+            (k, memo[k] if k in memo else utils.move_to_cpu(v))
+            for k, v in module_state_dict.items()
+        )
+    )
+    new_state.__dict__ = module_state_dict.__dict__
+
+    return new_state
 
 
 def _catalog_shared_params(module, memo=None, prefix=""):
