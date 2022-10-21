@@ -4,18 +4,13 @@
 # LICENSE file in the root directory of this source tree.
 
 from fairseq.dataclass.utils import gen_parser_from_dataclass
-from fairseq.models import (
-    register_model,
-    register_model_architecture,
-)
+from fairseq.models import register_model, register_model_architecture
+from fairseq.models.transformer.transformer_base import TransformerModelBase
 from fairseq.models.transformer.transformer_config import (
-    TransformerConfig,
     DEFAULT_MAX_SOURCE_POSITIONS,
     DEFAULT_MAX_TARGET_POSITIONS,
     DEFAULT_MIN_PARAMS_TO_WRAP,
-)
-from fairseq.models.transformer.transformer_base import (
-    TransformerModelBase,
+    TransformerConfig,
 )
 
 
@@ -219,6 +214,9 @@ def base_architecture(args):
     args.quant_noise_pq = getattr(args, "quant_noise_pq", 0)
     args.quant_noise_pq_block_size = getattr(args, "quant_noise_pq_block_size", 8)
     args.quant_noise_scalar = getattr(args, "quant_noise_scalar", 0)
+    args.disentangled_position_encoder_layers = getattr(
+        args, "disentangled_position_encoder_layers", None
+    )
 
 
 @register_model_architecture("transformer", "transformer_iwslt_de_en")

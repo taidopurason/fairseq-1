@@ -104,6 +104,10 @@ class TransformerConfig(FairseqDataclass):
         },
     )
     adaptive_input: bool = False
+    disentangled_position_encoder_layers: Optional[List[int]] = field(
+        default=None,
+        metadata={"help": "Indices of encoder layers with disentangle positions"},
+    )
     encoder: EncDecBaseConfig = EncDecBaseConfig()
     # TODO should really be in the encoder config
     max_source_positions: int = field(
