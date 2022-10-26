@@ -508,7 +508,9 @@ class Trainer(object):
             # load model parameters
             try:
                 self.model.load_state_dict(
-                    state["model"], strict=True, model_cfg=self.cfg.model
+                    state["model"],
+                    strict=not self.cfg.checkpoint.nonstrict_model_load,
+                    model_cfg=self.cfg.model,
                 )
                 # save memory for later steps
                 del state["model"]
