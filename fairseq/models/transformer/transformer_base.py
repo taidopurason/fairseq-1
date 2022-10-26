@@ -7,16 +7,17 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
+from torch import Tensor
+
 from fairseq import utils
 from fairseq.dataclass.utils import gen_parser_from_dataclass
 from fairseq.distributed import fsdp_wrap
 from fairseq.models import FairseqEncoderDecoderModel
 from fairseq.models.transformer import (
-    TransformerEncoderBase,
-    TransformerDecoderBase,
     TransformerConfig,
+    TransformerDecoderBase,
+    TransformerEncoderBase,
 )
-from torch import Tensor
 
 
 class TransformerModelBase(FairseqEncoderDecoderModel):
@@ -99,6 +100,33 @@ class TransformerModelBase(FairseqEncoderDecoderModel):
             # fsdp_wrap is a no-op when --ddp-backend != fully_sharded
             encoder = fsdp_wrap(encoder, min_num_params=cfg.min_params_to_wrap)
             decoder = fsdp_wrap(decoder, min_num_params=cfg.min_params_to_wrap)
+
+        def freeze_module(module):
+            if not hasattr(module, "named_parameters"):
+                return
+            for _, param in module.named_parameters():
+                param.requires_grad = False
+
+        if cfg.encoder.freeze:
+            freeze_module(encoder)
+        if cfg.decoder.freeze:
+            freeze_module(decoder)
+        if cfg.encoder.freeze_layers is not None:
+            for layer_idx in cfg.encoder.freeze_layers:
+                freeze_module(encoder.layers[layer_idx])
+        if cfg.decoder.freeze_layers is not None:
+            for layer_idx in cfg.decoder.freeze_layers:
+                freeze_module(decoder.layers[layer_idx])
+        if cfg.encoder.freeze_embeddings:
+            freeze_module(encoder.embed_tokens)
+            freeze_module(encoder.embed_positions)
+            freeze_module(encoder.layernorm_embedding)
+        if cfg.decoder.freeze_embeddings:
+            freeze_module(decoder.embed_tokens)
+            freeze_module(decoder.embed_positions)
+            freeze_module(decoder.layernorm_embedding)
+            freeze_module(decoder.output_projection)
+
         return cls(cfg, encoder, decoder)
 
     @classmethod

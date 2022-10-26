@@ -48,6 +48,9 @@ class EncDecBaseConfig(FairseqDataclass):
     layers_to_keep: Optional[List[int]] = field(
         default=None, metadata={"help": "which layers to *keep* when pruning"}
     )
+    freeze: bool = field(default=False)
+    freeze_embeddings: bool = field(default=False)
+    freeze_layers: Optional[List[int]] = field(default=None)
 
 
 @dataclass

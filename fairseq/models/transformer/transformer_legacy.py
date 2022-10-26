@@ -218,13 +218,20 @@ def base_architecture(args):
         args, "disentangled_position_encoder_layers", None
     )
     for arg_name, arg_default_value in (
-        ("encoder_input_output_adapter_layernorm", None),
+        ("encoder_input_output_adapter_layernorm", False),
         ("encoder_input_output_adapter_type", "linear"),
         ("encoder_adapted_output_dim", None),
         ("encoder_adapted_output_dims", None),
         ("encoder_layer_ffn_embed_dims", None),
         ("encoder_layer_embed_dims", None),
         ("encoder_layer_attention_heads", None),
+        ("encoder_layer_attention_heads", None),
+        ("encoder_freeze", False),
+        ("encoder_freeze_embeddings", False),
+        ("encoder_freeze_layers", None),
+        ("decoder_freeze", False),
+        ("decoder_freeze_embeddings", False),
+        ("decoder_freeze_layers", None),
     ):
         setattr(args, arg_name, getattr(args, arg_name, arg_default_value))
 
