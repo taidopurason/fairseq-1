@@ -6,7 +6,7 @@
 
 import re
 from dataclasses import dataclass, field, fields
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from omegaconf import II
 
@@ -48,6 +48,25 @@ class EncDecBaseConfig(FairseqDataclass):
     layers_to_keep: Optional[List[int]] = field(
         default=None, metadata={"help": "which layers to *keep* when pruning"}
     )
+
+
+@dataclass
+class EncoderConfig(EncDecBaseConfig):
+    input_output_adapter_layernorm: bool = field(default=False)
+    input_output_adapter_type: Optional[str] = field(default="linear")
+
+    adapted_output_dim: Optional[int] = field(default=None)
+    adapted_output_dims: Optional[Dict[int, int]] = field(default=None)
+
+    adapted_input_dim: Optional[int] = field(
+        default=None,
+        metadata={"help": "Used to pass adapted_input_dims to individual layers"},
+    )
+    adapted_input_dims: Optional[Dict[int, int]] = field(default=None)
+
+    layer_ffn_embed_dims: Optional[List[int]] = field(default=None)
+    layer_embed_dims: Optional[List[int]] = field(default=None)
+    layer_attention_heads: Optional[List[int]] = field(default=None)
 
 
 @dataclass
@@ -108,7 +127,7 @@ class TransformerConfig(FairseqDataclass):
         default=None,
         metadata={"help": "Indices of encoder layers with disentangle positions"},
     )
-    encoder: EncDecBaseConfig = EncDecBaseConfig()
+    encoder: EncoderConfig = EncoderConfig()
     # TODO should really be in the encoder config
     max_source_positions: int = field(
         default=DEFAULT_MAX_SOURCE_POSITIONS,
@@ -293,10 +312,10 @@ class TransformerConfig(FairseqDataclass):
                     # same but for encoder
                     if safe_hasattr(args, "encoder"):
                         seen.add("encoder")
-                        config.encoder = EncDecBaseConfig(**args.encoder)
+                        config.encoder = EncoderConfig(**args.encoder)
                     else:
                         config.encoder = cls._copy_keys(
-                            args, EncDecBaseConfig, "encoder", seen
+                            args, EncoderConfig, "encoder", seen
                         )
                 elif fld.name == "quant_noise":
                     # same but for quant_noise

@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import dataclasses
 import math
 from typing import Dict, List, Optional
 
@@ -92,7 +93,10 @@ class TransformerEncoderBase(FairseqEncoder):
         else:
             self.layers = nn.ModuleList([])
         self.layers.extend(
-            [self.build_encoder_layer(cfg) for i in range(cfg.encoder.layers)]
+            [
+                self.build_encoder_layer(self.get_layer_specific_cfg(cfg, i))
+                for i in range(cfg.encoder.layers)
+            ]
         )
         self.num_layers = len(self.layers)
 
@@ -108,6 +112,35 @@ class TransformerEncoderBase(FairseqEncoder):
             self.layer_norm = LayerNorm(embed_dim, export=cfg.export)
         else:
             self.layer_norm = None
+
+    def get_layer_specific_cfg(self, cfg, layer_idx):
+        layer_custom_args = (
+            ("adapted_output_dims", "adapted_output_dim"),
+            ("adapted_input_dims", "adapted_input_dim"),
+            ("layer_ffn_embed_dims", "ffn_embed_dim"),
+            ("layer_embed_dims", "embed_dim"),
+            ("layer_attention_heads", "attention_heads"),
+        )
+        enc_cfg = cfg.encoder
+
+        for arg_name, target_arg_name in layer_custom_args:
+            values = getattr(cfg.encoder, arg_name)
+            if values is None:
+                continue
+
+            if isinstance(values, dict):
+                assert all(x in set(range(cfg.encoder.layers)) for x in values.keys())
+                if layer_idx in values:
+                    enc_cfg = dataclasses.replace(
+                        enc_cfg, **{target_arg_name: values[layer_idx]}
+                    )
+            elif isinstance(values, list):
+                assert len(values) == cfg.encoder.layers
+                enc_cfg = dataclasses.replace(
+                    enc_cfg, **{target_arg_name: values[layer_idx]}
+                )
+
+        return dataclasses.replace(cfg, encoder=enc_cfg)
 
     def build_encoder_layer(self, cfg):
         layer = transformer_layer.TransformerEncoderLayerBase(cfg)

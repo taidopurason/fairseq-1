@@ -2,7 +2,7 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-
+import logging
 from typing import Dict, List, Optional
 
 import torch
@@ -14,6 +14,8 @@ from fairseq.models.transformer import TransformerConfig
 from fairseq.modules import LayerNorm, MultiheadAttention
 from fairseq.modules.fairseq_dropout import FairseqDropout
 from fairseq.modules.quant_noise import quant_noise
+
+logger = logging.getLogger(__name__)
 
 
 class TransformerEncoderLayerBase(nn.Module):
@@ -65,6 +67,31 @@ class TransformerEncoderLayerBase(nn.Module):
         )
 
         self.final_layer_norm = LayerNorm(self.embed_dim, export=cfg.export)
+
+        if cfg.encoder.adapted_output_dim is not None:
+            self.output_adapter = self.build_dim_adapter(
+                self.embed_dim,
+                cfg.encoder.adapted_output_dim,
+                self.quant_noise,
+                self.quant_noise_block_size,
+                adapter_type=cfg.encoder.input_output_adapter_type,
+                layernorm=cfg.encoder.input_output_adapter_layernorm,
+            )
+        else:
+            self.output_adapter = None
+
+        if cfg.encoder.adapted_input_dim is not None:
+            self.input_adapter = self.build_dim_adapter(
+                cfg.encoder.adapted_input_dim,
+                self.embed_dim,
+                self.quant_noise,
+                self.quant_noise_block_size,
+                adapter_type=cfg.encoder.input_output_adapter_type,
+                layernorm=cfg.encoder.input_output_adapter_layernorm,
+            )
+        else:
+            self.input_adapter = None
+
         self.disentangled_position = False
 
     def build_fc1(self, input_dim, output_dim, q_noise, qn_block_size):
@@ -76,6 +103,59 @@ class TransformerEncoderLayerBase(nn.Module):
         return quant_noise(
             nn.Linear(input_dim, output_dim), p=q_noise, block_size=qn_block_size
         )
+
+    def build_dim_adapter(
+        self,
+        input_dim,
+        output_dim,
+        q_noise,
+        qn_block_size,
+        adapter_type="linear",
+        layernorm=False,
+    ):
+        if input_dim == output_dim:
+            logger.warning(
+                f"Input and output dimensions of input/output adapter are the same. input_dim={input_dim}, output_dim={output_dim}"
+            )
+
+        adapter_layers = []
+
+        if layernorm and self.normalize_before:
+            adapter_layers.append(LayerNorm(output_dim))
+
+        if adapter_type == "linear":
+            adapter_layers.extend(
+                [
+                    quant_noise(
+                        nn.Linear(input_dim, output_dim),
+                        p=q_noise,
+                        block_size=qn_block_size,
+                    )
+                ]
+            )
+        elif adapter_type == "MLP":
+            adapter_layers.extend(
+                [
+                    quant_noise(
+                        nn.Linear(input_dim, output_dim),
+                        p=q_noise,
+                        block_size=qn_block_size,
+                    ),
+                    nn.ReLU(),
+                    quant_noise(
+                        nn.Linear(output_dim, output_dim),
+                        p=q_noise,
+                        block_size=qn_block_size,
+                    ),
+                ]
+            )
+        else:
+            raise ValueError(f"Unknown output adapter type {adapter_type}")
+
+        if layernorm and not self.normalize_before:
+            adapter_layers.append(LayerNorm(output_dim))
+
+        return nn.Sequential(*adapter_layers)
 
     def build_self_attention(self, embed_dim, cfg):
         return MultiheadAttention(
@@ -125,6 +205,9 @@ class TransformerEncoderLayerBase(nn.Module):
         Returns:
             encoded output of shape `(seq_len, batch, embed_dim)`
         """
+        if self.input_adapter is not None:
+            x = self.input_adapter(x)
+
         # anything in original attn_mask = 1, becomes -1e8
         # anything in original attn_mask = 0, becomes 0
         # Note that we cannot use -inf here, because at some edge cases,
@@ -163,7 +246,27 @@ class TransformerEncoderLayerBase(nn.Module):
             x = self.residual_connection(x, residual)
         if not self.normalize_before:
             x = self.final_layer_norm(x)
+
+        if self.output_adapter is not None:
+            x = self.output_adapter(x)
+
         return x
+
+
+def encoder_output_dim(cfg: TransformerConfig) -> int:
+    if (
+        cfg.encoder.adapted_output_dims is not None
+        and (cfg.encoder.layers - 1) in cfg.encoder.adapted_output_dims
+    ):
+        return cfg.encoder.adapted_output_dims[cfg.encoder.layers - 1]
+
+    if (
+        cfg.encoder.embed_dims is not None
+        and len(cfg.encoder.embed_dims) == cfg.encoder.layers
+    ):
+        return cfg.encoder.embed_dims[cfg.encoder.layers - 1]
+
+    return cfg.encoder.embed_dim
 
 
 # backward compatible with the legacy argparse format
@@ -305,8 +408,8 @@ class TransformerDecoderLayerBase(nn.Module):
         return MultiheadAttention(
             embed_dim,
             cfg.decoder.attention_heads,
-            kdim=cfg.encoder.embed_dim,
-            vdim=cfg.encoder.embed_dim,
+            kdim=encoder_output_dim(cfg),
+            vdim=encoder_output_dim(cfg),
             dropout=cfg.attention_dropout,
             encoder_decoder_attention=True,
             q_noise=self.quant_noise,
