@@ -261,10 +261,10 @@ def encoder_output_dim(cfg: TransformerConfig) -> int:
         return cfg.encoder.adapted_output_dims[cfg.encoder.layers - 1]
 
     if (
-        cfg.encoder.embed_dims is not None
-        and len(cfg.encoder.embed_dims) == cfg.encoder.layers
+        cfg.encoder.layer_embed_dims is not None
+        and len(cfg.encoder.layer_embed_dims) == cfg.encoder.layers
     ):
-        return cfg.encoder.embed_dims[cfg.encoder.layers - 1]
+        return cfg.encoder.layer_embed_dims[cfg.encoder.layers - 1]
 
     return cfg.encoder.embed_dim
 
