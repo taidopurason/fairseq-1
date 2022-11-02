@@ -152,7 +152,7 @@ def gen_parser_from_dataclass(
             elif get_origin(inter_type) is dict:
                 types = get_args(inter_type)
 
-                if any(t not in (str, int, float) for t in types):
+                if any(t not in (str, int, float, bool) for t in types):
                     raise ValueError(f"Unsupported args {types} in {str(inter_type)}")
 
                 kwargs["type"] = lambda x: eval_dict(x, *types[:2])

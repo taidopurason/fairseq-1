@@ -232,6 +232,8 @@ def base_architecture(args):
         ("decoder_freeze", False),
         ("decoder_freeze_embeddings", False),
         ("decoder_freeze_layers", None),
+        ("encoder_extra_output_layernorm", None),
+        ("encoder_extra_output_layernorms", None),
     ):
         setattr(args, arg_name, getattr(args, arg_name, arg_default_value))
 

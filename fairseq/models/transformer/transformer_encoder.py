@@ -109,7 +109,9 @@ class TransformerEncoderBase(FairseqEncoder):
                 self.layers[i].disentangled_position = True
 
         if cfg.encoder.normalize_before:
-            self.layer_norm = LayerNorm(embed_dim, export=cfg.export)
+            self.layer_norm = LayerNorm(
+                transformer_layer.encoder_output_dim(cfg), export=cfg.export
+            )
         else:
             self.layer_norm = None
 
@@ -120,6 +122,7 @@ class TransformerEncoderBase(FairseqEncoder):
             ("layer_ffn_embed_dims", "ffn_embed_dim"),
             ("layer_embed_dims", "embed_dim"),
             ("layer_attention_heads", "attention_heads"),
+            ("extra_output_layernorms", "extra_output_layernorm"),
         )
         enc_cfg = cfg.encoder
 

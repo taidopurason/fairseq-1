@@ -94,6 +94,11 @@ class TransformerEncoderLayerBase(nn.Module):
 
         self.disentangled_position = False
 
+        if cfg.encoder.extra_output_layernorm is not None:
+            self.extra_output_layernorm = LayerNorm(self.embed_dim, export=cfg.export)
+        else:
+            self.extra_output_layernorm = None
+
     def build_fc1(self, input_dim, output_dim, q_noise, qn_block_size):
         return quant_noise(
             nn.Linear(input_dim, output_dim), p=q_noise, block_size=qn_block_size
@@ -246,6 +251,9 @@ class TransformerEncoderLayerBase(nn.Module):
             x = self.residual_connection(x, residual)
         if not self.normalize_before:
             x = self.final_layer_norm(x)
+
+        if self.extra_output_layernorm is not None:
+            x = self.extra_output_layernorm(x)
 
         if self.output_adapter is not None:
             x = self.output_adapter(x)

@@ -71,6 +71,9 @@ class EncoderConfig(EncDecBaseConfig):
     layer_embed_dims: Optional[List[int]] = field(default=None)
     layer_attention_heads: Optional[List[int]] = field(default=None)
 
+    extra_output_layernorms: Optional[Dict[int, bool]] = field(default=None)
+    extra_output_layernorm: Optional[bool] = field(default=None)
+
 
 @dataclass
 class DecoderConfig(EncDecBaseConfig):
